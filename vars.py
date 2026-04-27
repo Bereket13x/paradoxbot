@@ -28,7 +28,7 @@ ALIVE_PIC = os.getenv("ALIVE_PIC", _PARADOX_IMG)
 PING_PIC = os.getenv("PING_PIC", _PARADOX_IMG)
 
 # Update Configuration
-UPSTREAM_REPO = os.getenv("UPSTREAM_REPO", "https://github.com/rishabhops/CipherElite")  # set to your fork
+UPSTREAM_REPO = os.getenv("UPSTREAM_REPO", "https://github.com/Bereket13x/paradoxbot")  # set to your fork
 BRANCH = os.getenv("BRANCH", "elite")
 
 # for  debugging dont edit this
