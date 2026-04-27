@@ -29,7 +29,7 @@ PING_PIC = os.getenv("PING_PIC", _PARADOX_IMG)
 
 # Update Configuration
 UPSTREAM_REPO = os.getenv("UPSTREAM_REPO", "https://github.com/Bereket13x/paradoxbot")  # set to your fork
-BRANCH = os.getenv("BRANCH", "elite")
+BRANCH = os.getenv("BRANCH", "main")
 
 # for  debugging dont edit this
 if API_ID == 0:
