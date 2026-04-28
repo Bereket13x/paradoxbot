@@ -218,15 +218,21 @@ async def auto_reply_handler(event):
                 pass
         return
 
-    # Stop once pmpermit has approved the user
+    # Fix: pmpermit handles ALL unapproved users — skip them here to avoid double-replies.
+    # Only auto-respond when the user IS approved (pmpermit ignores approved users).
+    # If pmpermit is disabled, respond to everyone.
     if event.is_private:
         db_path = "DB/assistant_db.json"
         if os.path.exists(db_path):
             try:
                 with open(db_path, "r", encoding="utf-8") as f:
                     db = json.load(f)
-                if str(event.chat_id) in db.get("approved_users", []):
-                    return
+                cfg = db.get("config", {})
+                pmpermit_enabled = cfg.get("pmpermit_enabled", True)
+                if pmpermit_enabled:
+                    # pmpermit is ON → only respond to approved contacts
+                    if str(event.chat_id) not in db.get("approved_users", []):
+                        return  # unapproved: let pmpermit handle it
             except Exception:
                 pass
 
