@@ -179,7 +179,7 @@ async def alive(event):
         else ALIVE_STYLES[user_config.alive_style_index]
     )
     text = template.format(
-        name=event.sender.first_name,
+        name=(event.sender.first_name if event.sender else (await event.client.get_me()).first_name),
         telethon=version.__version__,
         plugins=len(CMD_LIST),
         uptime=uptime
