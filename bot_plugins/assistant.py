@@ -13,8 +13,8 @@ from pathlib import Path
 from telethon import events, Button
 import html
 
-# Database file path
-DB_PATH = Path(__file__).parent.parent / "DB" / "assistant_db.json"
+# Database file path — SEPARATE from pmpermit's assistant_db.json to avoid schema conflict
+DB_PATH = Path(__file__).parent.parent / "DB" / "bot_assistant_db.json"
 
 # Global variables
 bot_instance = None
@@ -22,16 +22,8 @@ owner_user_id = None
 owner_display_name = None
 
 def load_database():
-    """Load assistant database from JSON file"""
-    if DB_PATH.exists():
-        try:
-            with open(DB_PATH, 'r') as f:
-                return json.load(f)
-        except Exception as e:
-            print(f"Error loading assistant database: {e}")
-    
-    # Default database structure
-    return {
+    """Load assistant database from JSON file, always merging with defaults."""
+    default = {
         "assistant_enabled": False,
         "users": [],
         "user_message_map": {},
@@ -40,6 +32,26 @@ def load_database():
             "total_replies": 0
         }
     }
+    if DB_PATH.exists():
+        try:
+            with open(DB_PATH, 'r') as f:
+                data = json.load(f)
+            # Merge with defaults: ensure every required key exists
+            for key, val in default.items():
+                if key not in data:
+                    data[key] = val
+            # Ensure users is always a list (auto-repair if corrupted)
+            if not isinstance(data["users"], list):
+                data["users"] = []
+            # Ensure stats sub-keys exist
+            if not isinstance(data.get("stats"), dict):
+                data["stats"] = default["stats"]
+            for k, v in default["stats"].items():
+                data["stats"].setdefault(k, v)
+            return data
+        except Exception as e:
+            print(f"Error loading assistant database: {e}")
+    return default
 
 def save_database(db):
     """Save assistant database to JSON file"""
