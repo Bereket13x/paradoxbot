@@ -1,4 +1,4 @@
-```python name=plugins/paradox_ai.py url=https://github.com/Bereket13x/paradoxbot/blob/main/plugins/paradox_ai.py
+
 # =============================================================================
 #  PARADOX Userbot Plugin
 #
