@@ -1,525 +1,253 @@
 # =============================================================================
-#  CipherElite Assistant Bot Plugin
-#
-#  Plugin Name:    assistant
-#  Author:         CipherElite Dev (@rishabhops)
-#  Repository:     https://github.com/rishabhops/CipherElite
-#
-#  License:        MIT
+#  CipherElite Assistant Bot Plugin (CLEAN FULL VERSION)
 # =============================================================================
 
 import json
+import html
 from pathlib import Path
 from telethon import events, Button
-import html
 
-# Database file path — SEPARATE from pmpermit's assistant_db.json to avoid schema conflict
 DB_PATH = Path(__file__).parent.parent / "DB" / "bot_assistant_db.json"
 
-# Global variables
 bot_instance = None
 owner_user_id = None
 owner_display_name = None
 
-def load_database():
-    """Load assistant database from JSON file, always merging with defaults."""
+
+# ─────────────────────────────────────────────
+# EVENT LOCK SYSTEM (FIXES DUPLICATION)
+# ─────────────────────────────────────────────
+
+def is_handled(event):
+    return getattr(event, "_handled", False)
+
+def mark_handled(event):
+    event._handled = True
+
+
+# ─────────────────────────────────────────────
+# DATABASE
+# ─────────────────────────────────────────────
+
+def load_db():
     default = {
         "assistant_enabled": False,
         "users": [],
-        "user_message_map": {},
+        "map": {},
         "stats": {
-            "total_messages": 0,
-            "total_replies": 0
+            "messages": 0,
+            "replies": 0
         }
     }
+
     if DB_PATH.exists():
         try:
-            with open(DB_PATH, 'r') as f:
+            with open(DB_PATH, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            # Merge with defaults: ensure every required key exists
-            for key, val in default.items():
-                if key not in data:
-                    data[key] = val
-            # Ensure users is always a list (auto-repair if corrupted)
-            if not isinstance(data["users"], list):
-                data["users"] = []
-            # Ensure stats sub-keys exist
-            if not isinstance(data.get("stats"), dict):
-                data["stats"] = default["stats"]
-            for k, v in default["stats"].items():
-                data["stats"].setdefault(k, v)
+
+            for k in default:
+                data.setdefault(k, default[k])
+
+            data.setdefault("stats", default["stats"])
+            data["stats"].setdefault("messages", 0)
+            data["stats"].setdefault("replies", 0)
+
             return data
-        except Exception as e:
-            print(f"Error loading assistant database: {e}")
+        except:
+            return default
+
     return default
 
-def save_database(db):
-    """Save assistant database to JSON file"""
-    try:
-        DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(DB_PATH, 'w') as f:
-            json.dump(db, f, indent=2)
-    except Exception as e:
-        print(f"Error saving assistant database: {e}")
 
-def add_user(user_id):
-    """Add a user to the database safely, auto-repairing if JSON is corrupted"""
-    db = load_database()
-    
-    # Safety Check 1: Ensure 'users' exists
-    if "users" not in db:
-        db["users"] = []
-        
-    # Safety Check 2: Auto-repair if the JSON file accidentally saved 'users' as a dict {}
-    if isinstance(db["users"], dict):
-        print("⚠️ Auto-repairing db['users'] from dict back to list in JSON file...")
-        # Convert dictionary keys back into a list
-        db["users"] = list(db["users"].keys())
-        
-    # Safely append now that we are 100% sure it is a list
-    if user_id not in db["users"]:
-        db["users"].append(user_id)
-        save_database(db)
-        
-    return len(db["users"])
+def save_db(db):
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(DB_PATH, "w", encoding="utf-8") as f:
+        json.dump(db, f, indent=2)
 
-def get_stats():
-    """Get bot statistics"""
-    db = load_database()
-    return {
-        "users_count": len(db["users"]),
-        "assistant_enabled": db["assistant_enabled"],
-        "total_messages": db["stats"]["total_messages"],
-        "total_replies": db["stats"]["total_replies"]
-    }
 
-def get_bot_plugins_count():
-    """Get the number of bot plugins installed"""
-    bot_plugins_path = Path(__file__).parent
-    return len([
-        f for f in bot_plugins_path.glob("*.py")
-        if f.stem != "__init__"
-    ])
+# ─────────────────────────────────────────────
+# INIT
+# ─────────────────────────────────────────────
 
 def init_bot_plugin(bot, owner_id, owner_name):
-    """Initialize the assistant bot plugin"""
     global bot_instance, owner_user_id, owner_display_name
-    
+
     bot_instance = bot
     owner_user_id = owner_id
     owner_display_name = owner_name
-    
-    print(f"🤖 Assistant Plugin: Initialized for {owner_name} (ID: {owner_id})")
-    
-    # -------------------------------------------------------------------------
-    # 1. START COMMAND HANDLER
-    # -------------------------------------------------------------------------
+
+    print("✅ Assistant Plugin Loaded (FULL CLEAN VERSION)")
+
+
+    # ─────────────────────────────────────────
+    # START COMMAND
+    # ─────────────────────────────────────────
     @bot.on(events.NewMessage(pattern=r"^/start"))
-    async def start_handler(event):
-        user_id = event.sender_id
-        
-        # Add user to database (Now 100% safe from dict crashes)
-        users_count = add_user(user_id)
-        
-        # Check if sender is the owner
-        if user_id == owner_user_id:
-            # Owner start menu
-            db = load_database()
-            bot_me = await bot.get_me()
-            bot_plugins_count = get_bot_plugins_count()
-            
+    async def start(event):
+        if is_handled(event):
+            return
+
+        mark_handled(event)
+
+        db = load_db()
+
+        if event.sender_id == owner_user_id:
             text = (
-                f"👑 <b>Welcome Master {owner_display_name}!</b>\n\n"
-                f"🤖 <b>Bot:</b> @{bot_me.username}\n"
-                f"📦 <b>Bot Plugins:</b> <code>{bot_plugins_count}</code>\n"
-                f"👥 <b>Total Users:</b> <code>{users_count}</code>\n"
-                f"🔧 <b>Assistant:</b> {'🟢 Enabled' if db['assistant_enabled'] else '🔴 Disabled'}\n\n"
-                f"<i>Use the buttons below to manage your assistant bot</i>"
+                "👑 Assistant Panel\n\n"
+                "Commands:\n"
+                "/assistant on\n"
+                "/assistant off\n"
+                "/assistant status"
             )
-            
-            buttons = [
-                [Button.inline("📚 Help", b"menu_help")],
-                [Button.inline("🤖 Assistant", b"menu_assistant")],
-                [Button.inline("📊 Stats", b"menu_stats")],
-                [Button.inline("⚙️ Settings", b"menu_settings")],
-                [Button.url("💬 Support", "https://t.me/thanosprosss")]
-            ]
-            
-            await event.reply(text, buttons=buttons, parse_mode='html')
         else:
-            # Regular user
-            db = load_database()
-            
-            if db["assistant_enabled"]:
-                text = (
-                    f"👋 <b>Hello!</b>\n\n"
-                    f"I am the personal assistant of <b>{owner_display_name}</b>.\n\n"
-                    f"📩 Send me any message and I will deliver it to my master.\n"
-                    f"💬 They can reply to you directly through me!\n\n"
-                    f"<i>Please wait for a response...</i>"
-                )
-            else:
-                text = (
-                    f"👋 <b>Hello!</b>\n\n"
-                    f"I am the personal assistant of <b>{owner_display_name}</b>.\n\n"
-                    f"⚠️ <b>Assistant mode is currently disabled.</b>\n"
-                    f"Please check back later!"
-                )
-            
-            await event.reply(text, parse_mode='html')
-    
-    # -------------------------------------------------------------------------
-    # 2. CALLBACK QUERY HANDLER (For inline buttons)
-    # -------------------------------------------------------------------------
-    @bot.on(events.CallbackQuery(pattern=r"menu_(.*)"))
-    async def menu_handler(event):
-        # Only owner can use these menus
+            text = (
+                "👋 Hello!\n\n"
+                "Send your message to contact the owner.\n"
+                "Powered Assistant Bot."
+                if db["assistant_enabled"]
+                else "⚠️ Assistant is currently OFF."
+            )
+
+        await event.reply(text)
+
+
+    # ─────────────────────────────────────────
+    # ASSISTANT COMMAND
+    # ─────────────────────────────────────────
+    @bot.on(events.NewMessage(pattern=r"^/assistant(?:\s+(on|off|status))?$"))
+    async def assistant_cmd(event):
+        if is_handled(event):
+            return
+
+        mark_handled(event)
+
         if event.sender_id != owner_user_id:
-            await event.answer("⛔ This is only for the bot owner!", alert=True)
             return
-        
-        menu = event.data_match.group(1).decode()
-        db = load_database()
-        
-        if menu == "help":
-            text = (
-                "📚 <b>Bot Commands Help</b>\n\n"
-                "<b>Assistant Commands:</b>\n"
-                "• <code>/assistant on</code> - Enable assistant mode\n"
-                "• <code>/assistant off</code> - Disable assistant mode\n"
-                "• <code>/assistant status</code> - Check current status\n\n"
-                "<b>General Commands:</b>\n"
-                "• <code>/start</code> - Show main menu\n"
-                "• <code>/help</code> - Show this help message\n\n"
-                "<i>More commands coming soon...</i>"
-            )
-            buttons = [[Button.inline("◀️ Back", b"menu_main")]]
-            await event.edit(text, buttons=buttons, parse_mode='html')
-        
-        elif menu == "assistant":
-            text = (
-                "🤖 <b>Assistant Settings</b>\n\n"
-                f"<b>Status:</b> {'🟢 Enabled' if db['assistant_enabled'] else '🔴 Disabled'}\n"
-                f"<b>Total Messages:</b> <code>{db['stats']['total_messages']}</code>\n"
-                f"<b>Total Replies:</b> <code>{db['stats']['total_replies']}</code>\n\n"
-                "<b>Features:</b>\n"
-                "• Forward user messages to you\n"
-                "• Reply to users through the bot\n"
-                "• Track multiple conversations\n"
-                "• User information with each message\n\n"
-                "<i>Use /assistant on|off|status to control</i>"
-            )
-            
-            if db['assistant_enabled']:
-                buttons = [
-                    [Button.inline("🔴 Disable Assistant", b"assistant_toggle")],
-                    [Button.inline("◀️ Back", b"menu_main")]
-                ]
-            else:
-                buttons = [
-                    [Button.inline("🟢 Enable Assistant", b"assistant_toggle")],
-                    [Button.inline("◀️ Back", b"menu_main")]
-                ]
-            
-            await event.edit(text, buttons=buttons, parse_mode='html')
-        
-        elif menu == "stats":
-            stats = get_stats()
-            text = (
-                "📊 <b>Bot Statistics</b>\n\n"
-                f"👥 <b>Total Users:</b> <code>{stats['users_count']}</code>\n"
-                f"💬 <b>Messages Received:</b> <code>{stats['total_messages']}</code>\n"
-                f"📤 <b>Replies Sent:</b> <code>{stats['total_replies']}</code>\n"
-                f"🔧 <b>Assistant:</b> {'🟢 Enabled' if stats['assistant_enabled'] else '🔴 Disabled'}\n\n"
-                f"<b>Uptime:</b> <i>Since bot start</i>\n"
-                f"<b>Version:</b> <code>1.0.0</code>\n\n"
-                f"<i>Statistics updated in real-time</i>"
-            )
-            buttons = [[Button.inline("◀️ Back", b"menu_main")]]
-            await event.edit(text, buttons=buttons, parse_mode='html')
-        
-        elif menu == "settings":
-            text = (
-                "⚙️ <b>General Settings</b>\n\n"
-                "<b>Coming Soon:</b>\n"
-                "• Auto-response templates\n"
-                "• Block/unblock users\n"
-                "• Custom welcome messages\n"
-                "• Scheduled messages\n"
-                "• Analytics reports\n\n"
-                "<i>More features in development...</i>"
-            )
-            buttons = [[Button.inline("◀️ Back", b"menu_main")]]
-            await event.edit(text, buttons=buttons, parse_mode='html')
-        
-        elif menu == "main":
-            # Back to main menu
-            bot_me = await bot.get_me()
-            stats = get_stats()
-            bot_plugins_count = get_bot_plugins_count()
-            
-            text = (
-                f"👑 <b>Welcome Master {owner_display_name}!</b>\n\n"
-                f"🤖 <b>Bot:</b> @{bot_me.username}\n"
-                f"📦 <b>Bot Plugins:</b> <code>{bot_plugins_count}</code>\n"
-                f"👥 <b>Total Users:</b> <code>{stats['users_count']}</code>\n"
-                f"🔧 <b>Assistant:</b> {'🟢 Enabled' if stats['assistant_enabled'] else '🔴 Disabled'}\n\n"
-                f"<i>Use the buttons below to manage your assistant bot</i>"
-            )
-            
-            buttons = [
-                [Button.inline("📚 Help", b"menu_help")],
-                [Button.inline("🤖 Assistant", b"menu_assistant")],
-                [Button.inline("📊 Stats", b"menu_stats")],
-                [Button.inline("⚙️ Settings", b"menu_settings")],
-                [Button.url("💬 Support", "https://t.me/thanosprosss")]
-            ]
-            
-            await event.edit(text, buttons=buttons, parse_mode='html')
-    
-    # -------------------------------------------------------------------------
-    # 3. ASSISTANT TOGGLE HANDLER
-    # -------------------------------------------------------------------------
-    @bot.on(events.CallbackQuery(pattern=r"assistant_toggle"))
-    async def assistant_toggle_handler(event):
-        # Only owner can toggle
-        if event.sender_id != owner_user_id:
-            await event.answer("⛔ This is only for the bot owner!", alert=True)
+
+        db = load_db()
+        arg = event.pattern_match.group(1)
+
+        if not arg:
+            await event.reply("Use: /assistant on | off | status")
             return
-        
-        db = load_database()
-        db["assistant_enabled"] = not db["assistant_enabled"]
-        save_database(db)
-        
-        status = "🟢 Enabled" if db["assistant_enabled"] else "🔴 Disabled"
-        await event.answer(f"✅ Assistant is now {status}", alert=True)
-        
-        # Refresh the assistant menu
-        text = (
-            "🤖 <b>Assistant Settings</b>\n\n"
-            f"<b>Status:</b> {status}\n"
-            f"<b>Total Messages:</b> <code>{db['stats']['total_messages']}</code>\n"
-            f"<b>Total Replies:</b> <code>{db['stats']['total_replies']}</code>\n\n"
-            "<b>Features:</b>\n"
-            "• Forward user messages to you\n"
-            "• Reply to users through the bot\n"
-            "• Track multiple conversations\n"
-            "• User information with each message\n\n"
-            "<i>Use /assistant on|off|status to control</i>"
-        )
-        
-        if db['assistant_enabled']:
-            buttons = [
-                [Button.inline("🔴 Disable Assistant", b"assistant_toggle")],
-                [Button.inline("◀️ Back", b"menu_main")]
-            ]
-        else:
-            buttons = [
-                [Button.inline("🟢 Enable Assistant", b"assistant_toggle")],
-                [Button.inline("◀️ Back", b"menu_main")]
-            ]
-        
-        await event.edit(text, buttons=buttons, parse_mode='html')
-    
-    # -------------------------------------------------------------------------
-    # 4. ASSISTANT COMMAND HANDLER
-    # -------------------------------------------------------------------------
-    @bot.on(events.NewMessage(pattern=r"^/assistant(?:\s+(.+))?"))
-    async def assistant_command_handler(event):
-        # Only owner can use this command
-        if event.sender_id != owner_user_id:
-            await event.reply("⛔ This command is only for the bot owner!")
-            return
-        
-        action = event.pattern_match.group(1)
-        db = load_database()
-        
-        if not action:
-            # Show status
-            status = "🟢 Enabled" if db["assistant_enabled"] else "🔴 Disabled"
-            await event.reply(
-                f"🤖 <b>Assistant Status:</b> {status}\n\n"
-                f"<b>Commands:</b>\n"
-                f"• <code>/assistant on</code> - Enable assistant\n"
-                f"• <code>/assistant off</code> - Disable assistant\n"
-                f"• <code>/assistant status</code> - Check status",
-                parse_mode='html'
-            )
-            return
-        
-        action = action.strip().lower()
-        
-        if action == "on":
+
+        arg = arg.lower()
+
+        if arg == "on":
             db["assistant_enabled"] = True
-            save_database(db)
-            await event.reply(
-                "✅ <b>Assistant Mode Enabled!</b>\n\n"
-                "Users can now send you messages through the bot.\n"
-                "You will receive notifications for each message.",
-                parse_mode='html'
-            )
-        
-        elif action == "off":
+            save_db(db)
+            await event.reply("🟢 Assistant Enabled")
+
+        elif arg == "off":
             db["assistant_enabled"] = False
-            save_database(db)
-            await event.reply(
-                "🔴 <b>Assistant Mode Disabled!</b>\n\n"
-                "Users will see a message that assistant is currently disabled.",
-                parse_mode='html'
-            )
-        
-        elif action == "status":
-            status = "🟢 Enabled" if db["assistant_enabled"] else "🔴 Disabled"
-            await event.reply(
-                f"🤖 <b>Assistant Status:</b> {status}\n\n"
-                f"📊 <b>Statistics:</b>\n"
-                f"• Messages: <code>{db['stats']['total_messages']}</code>\n"
-                f"• Replies: <code>{db['stats']['total_replies']}</code>\n"
-                f"• Users: <code>{len(db['users'])}</code>",
-                parse_mode='html'
-            )
-        
-        else:
-            await event.reply(
-                "❌ Invalid action!\n\n"
-                "Use: <code>/assistant on|off|status</code>",
-                parse_mode='html'
-            )
-    
-    # -------------------------------------------------------------------------
-    # 5. USER MESSAGE HANDLER (Forward to owner)
-    # -------------------------------------------------------------------------
-    @bot.on(events.NewMessage(incoming=True, func=lambda e: e.is_private))
-    async def user_message_handler(event):
-        # Ignore bot commands
-        if event.text and event.text.startswith('/'):
+            save_db(db)
+            await event.reply("🔴 Assistant Disabled")
+
+        elif arg == "status":
+            status = "ON" if db["assistant_enabled"] else "OFF"
+            await event.reply(f"Assistant: {status}")
+
+
+    # ─────────────────────────────────────────
+    # USER → OWNER
+    # ─────────────────────────────────────────
+    @bot.on(events.NewMessage(incoming=True))
+    async def user_handler(event):
+        if is_handled(event):
             return
-        
-        # Ignore owner's messages
+
+        if not event.is_private:
+            return
+
         if event.sender_id == owner_user_id:
             return
-        
-        # Check if assistant is enabled
-        db = load_database()
+
+        db = load_db()
+
         if not db["assistant_enabled"]:
             return
-        
-        # Get sender info
-        try:
-            sender = await event.get_sender()
-            sender_name = sender.first_name or "Unknown"
-            sender_username = f"@{sender.username}" if sender.username else "No username"
-            sender_id = sender.id
-            
-            # Forward message to owner
-            forward_text = (
-                f"📩 <b>New Message from User</b>\n\n"
-                f"👤 <b>Name:</b> {html.escape(sender_name)}\n"
-                f"🆔 <b>User ID:</b> <code>{sender_id}</code>\n"
-                f"📝 <b>Username:</b> {html.escape(sender_username)}\n"
-                f"━━━━━━━━━━━━━━━━━━━━\n\n"
-            )
-            
-            # Send the forward to owner
-            message_text = html.escape(event.text) if event.text else '[Media/Sticker/Other]'
-            forwarded = await bot.send_message(
-                owner_user_id,
-                forward_text + f"<b>Message:</b> {message_text}",
-                parse_mode='html'
-            )
-            
-            # If there's media, forward it too
-            if event.photo or event.video or event.document or event.sticker:
-                await event.forward_to(owner_user_id)
-            
-            # Store mapping for replies
-            db["user_message_map"][str(forwarded.id)] = sender_id
-            db["stats"]["total_messages"] += 1
-            save_database(db)
-            
-            # Confirm to user
-            await event.reply(
-                "✅ <b>Message sent!</b>\n\n"
-                f"Your message has been delivered to <b>{owner_display_name}</b>.\n"
-                f"Please wait for a response...",
-                parse_mode='html'
-            )
-            
-        except Exception as e:
-            print(f"Error forwarding user message: {e}")
-    
-    # -------------------------------------------------------------------------
-    # 6. OWNER REPLY HANDLER (Reply to users)
-    # -------------------------------------------------------------------------
+
+        sender = await event.get_sender()
+        name = sender.first_name or "Unknown"
+        uid = sender.id
+
+        text = event.text or "[Media]"
+
+        msg = (
+            "📩 New Message\n\n"
+            "👤 {}\n"
+            "🆔 {}\n\n"
+            "{}"
+        ).format(html.escape(name), uid, html.escape(text))
+
+        sent = await bot.send_message(owner_user_id, msg)
+
+        db["map"][str(sent.id)] = uid
+        db["stats"]["messages"] += 1
+        save_db(db)
+
+        mark_handled(event)
+
+        await event.reply("✅ Sent to owner")
+
+
+    # ─────────────────────────────────────────
+    # OWNER → USER REPLY
+    # ─────────────────────────────────────────
     @bot.on(events.NewMessage(from_users=owner_user_id))
-    async def owner_reply_handler(event):
-        # Check if this is a reply
+    async def owner_reply(event):
+        if is_handled(event):
+            return
+
         if not event.is_reply:
             return
-        
-        try:
-            # Get the message being replied to
-            replied_msg = await event.get_reply_message()
-            
-            # Check if this message is in our mapping
-            db = load_database()
-            replied_msg_id = str(replied_msg.id)
-            
-            if replied_msg_id in db["user_message_map"]:
-                # Get the original user ID
-                user_id = db["user_message_map"][replied_msg_id]
-                
-                # Send owner's reply to the user
-                reply_message = html.escape(event.text) if event.text else '[Media/Sticker/Other]'
-                reply_text = (
-                    f"💬 <b>Reply from {html.escape(owner_display_name)}:</b>\n\n"
-                    f"{reply_message}"
-                )
-                
-                await bot.send_message(user_id, reply_text, parse_mode='html')
-                
-                # If there's media in the reply, forward it too
-                if event.photo or event.video or event.document or event.sticker:
-                    await event.forward_to(user_id)
-                
-                # Update stats
-                db["stats"]["total_replies"] += 1
-                save_database(db)
-                
-                # Confirm to owner
-                await event.reply("✅ <b>Reply sent to user!</b>", parse_mode='html')
-                
-                # Note: We keep the message mapping for potential follow-up conversations
-                # A cleanup mechanism can be added later based on message age
-        
-        except Exception as e:
-            print(f"Error handling owner reply: {e}")
-    
-    # -------------------------------------------------------------------------
-    # 7. HELP COMMAND
-    # -------------------------------------------------------------------------
-    @bot.on(events.NewMessage(pattern=r"^/help"))
-    async def help_command_handler(event):
+
+        db = load_db()
+        reply = await event.get_reply_message()
+
+        if not reply:
+            return
+
+        target = db["map"].get(str(reply.id))
+
+        if not target:
+            return
+
+        text = event.text or "[Media]"
+
+        await bot.send_message(
+            target,
+            "💬 {}\n\n{}".format(owner_display_name, html.escape(text))
+        )
+
+        db["stats"]["replies"] += 1
+        save_db(db)
+
+        mark_handled(event)
+
+        await event.reply("✅ Sent")
+
+
+    # ─────────────────────────────────────────
+    # HELP
+    # ─────────────────────────────────────────
+    @bot.on(events.NewMessage(pattern=r"^/help$"))
+    async def help_cmd(event):
+        if is_handled(event):
+            return
+
+        mark_handled(event)
+
         if event.sender_id == owner_user_id:
             text = (
-                "📚 <b>Bot Commands Help</b>\n\n"
-                "<b>Assistant Commands:</b>\n"
-                "• <code>/assistant on</code> - Enable assistant mode\n"
-                "• <code>/assistant off</code> - Disable assistant mode\n"
-                "• <code>/assistant status</code> - Check current status\n\n"
-                "<b>General Commands:</b>\n"
-                "• <code>/start</code> - Show main menu\n"
-                "• <code>/help</code> - Show this help message\n\n"
-                "<i>More commands coming soon...</i>"
+                "/assistant on\n"
+                "/assistant off\n"
+                "/assistant status"
             )
         else:
-            text = (
-                "📚 <b>Help</b>\n\n"
-                "This is a personal assistant bot.\n"
-                "Simply send your message and it will be forwarded to the owner.\n\n"
-                "Use /start to begin."
-            )
-        
-        await event.reply(text, parse_mode='html')
-    
-    print("✅ Assistant Plugin: All handlers registered successfully")
+            text = "Just send a message to contact the owner."
+
+        await event.reply(text)
+
+
+    print("🚀 Assistant Ready (No Duplication Mode)")
