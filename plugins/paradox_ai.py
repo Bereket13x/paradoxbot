@@ -10,6 +10,7 @@ import re
 import os
 import json
 from datetime import datetime
+from typing import Optional
 
 from openai import AsyncOpenAI, OpenAIError, AuthenticationError, RateLimitError
 from telethon import events
@@ -25,14 +26,14 @@ GEMINI_BASE_URL    = "https://generativelanguage.googleapis.com/v1beta/openai/"
 GEMINI_DEFAULT_MODEL = "gemini-2.0-flash"
 
 # ── Runtime state ──────────────────────────────────────────────────────────
-conversation_history: dict = {}
+conversation_history = {}
 AUTO_AI_STATE = "OFF"   # "OFF" | "ALL"
 
 # ══════════════════════════════════════════════════════════════════
 #  Helpers
 # ══════════════════════════════════════════════════════════════════
 
-def get_system_prompt() -> dict:
+def get_system_prompt():
     current_time = datetime.now().strftime("%A, %B %d, %Y - %I:%M %p")
     return {
         "role": "system",
@@ -50,7 +51,7 @@ def get_system_prompt() -> dict:
         )
     }
 
-def _build_client(provider: str, nvidia_key: str | None, gemini_key: str | None):
+def _build_client(provider: str, nvidia_key: Optional[str], gemini_key: Optional[str]):
     if provider == "gemini" and gemini_key:
         return AsyncOpenAI(base_url=GEMINI_BASE_URL, api_key=gemini_key), GEMINI_DEFAULT_MODEL
     if nvidia_key:
@@ -63,7 +64,7 @@ def is_english(text: str) -> bool:
     ascii_ratio = sum(1 for c in text if c.isascii()) / max(1, len(text))
     return ascii_ratio >= 0.9
 
-async def make_ai_request(messages: list, temperature=0.6, top_p=0.7, max_tokens=2048) -> str:
+async def make_ai_request(messages, temperature=0.6, top_p=0.7, max_tokens=2048):
     try:
         from plugins.ai_setup import ai_config
         provider   = ai_config.get_provider()
@@ -162,7 +163,7 @@ async def autoai_handler(event):
         AUTO_AI_STATE = "OFF"
         await event.reply("❌ **Auto AI disabled.**")
     elif action == "status":
-        await event.reply(f"🤖 **Auto AI is currently `{AUTO_AI_STATE}`.**")
+        await event.reply(f"🤖 **Auto AI is currently `{AUTO_AI_STATE}`.")
 
 @CipherElite.on(events.NewMessage())
 async def auto_reply_handler(event):
@@ -349,7 +350,7 @@ async def aigemini_handler(event):
             return
 
         ai_config.set_gemini_key(api_key.strip())
-        ai_config.set_provider("gemini")      # auto-switch to Gemini
+        ai_config.set_provider("gemini")
         msg = await event.respond("✅ **Gemini API Key set! Provider auto-switched to Gemini.**")
         await asyncio.sleep(5)
         try:
