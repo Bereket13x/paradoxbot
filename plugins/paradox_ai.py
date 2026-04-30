@@ -31,7 +31,7 @@ def get_system_prompt():
     return {
         "role": "system",
         "content": (
-            f"You are the user's personal AI assistant. You were developed by Paradox Ethiopian Developer. "
+            f"You are the user's personal AI assistant. You were developed by @netcorexp. "
             f"Current Date: {current_time}. Provide natural and highly accurate answers to the people messaging you. "
             "Do not unnecessarily introduce yourself or mention technical details about being a userbot in every message. Just directly and politely answer. "
             "By default, keep your answers short and concise but ensure they provide a good, clear explanation. "
