@@ -18,13 +18,20 @@ from utils.utils import CipherElite
 from utils.decorators import rishabh
 from plugins.bot import add_handler
 
-NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
+# ── Provider constants ─────────────────────────────────────────────────────
+NVIDIA_BASE_URL    = "https://integrate.api.nvidia.com/v1"
 NVIDIA_DEFAULT_MODEL = "mistralai/mistral-nemotron"
-GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+GEMINI_BASE_URL    = "https://generativelanguage.googleapis.com/v1beta/openai/"
 GEMINI_DEFAULT_MODEL = "gemini-2.0-flash"
 
+# ── Runtime state ──────────────────────────────────────────────────────────
 conversation_history: dict = {}
 AUTO_AI_STATE = "OFF"   # "OFF" | "ALL"
+
+# ══════════════════════════════════════════════════════════════════
+#  Helpers
+# ══════════════════════════════════════════════════════════════════
 
 def get_system_prompt() -> dict:
     current_time = datetime.now().strftime("%A, %B %d, %Y - %I:%M %p")
@@ -54,7 +61,6 @@ def _build_client(provider: str, nvidia_key: str | None, gemini_key: str | None)
 def is_english(text: str) -> bool:
     if not text:
         return True
-    # Checks that most of the message consists of ASCII characters.
     ascii_ratio = sum(1 for c in text if c.isascii()) / max(1, len(text))
     return ascii_ratio >= 0.9
 
@@ -227,4 +233,213 @@ async def auto_reply_handler(event):
         print("Exception in auto_reply_handler:", e)
         pass
 
-# ...rest of the plugin (pai commands, provider config, clear, status, etc.) stay the same...
+@CipherElite.on(events.NewMessage(pattern=r"\.pai(?:\s+(.*))?"))
+@rishabh()
+async def ai_handler(event):
+    thinking_msg = None
+    try:
+        from plugins.ai_setup import ai_config
+
+        if not ai_config.is_enabled():
+            provider = ai_config.get_provider()
+            hint = "`.paigemini <key>` or `.setai <key>`" if provider == "gemini" else "`.paiset <key>` or `.setnai <key>`"
+            await event.reply(f"🔑 **API Key Required!**\n\nUse {hint} to set your key.")
+            return
+
+        query = event.pattern_match.group(1)
+
+        try:
+            reply_msg = await event.get_reply_message()
+            if reply_msg and reply_msg.text:
+                ctx = f"Context message: {reply_msg.text}\n\n"
+                query = f"{ctx}{query}" if query else f"Analyze or reply to this:\n\n{ctx}"
+        except Exception:
+            pass
+
+        if not query:
+            await event.reply(
+                "❓ **Usage:** `.pai <your question>`\n"
+                "Or reply to a message with `.pai` to analyze it."
+            )
+            return
+
+        if len(query) > 2000:
+            await event.reply("📝 **Query too long!** Keep it under 2000 characters.")
+            return
+
+        if not is_english(query):
+            await event.reply("I'm sorry, I can only understand and respond in English. Please message me in English for assistance.")
+            return
+
+        thinking_msg = await event.respond("**[░░░░░░░░░░]  0%** ⏳ `Connecting to PARADOX AI...`")
+
+        chat_id = event.chat_id
+        if chat_id not in conversation_history:
+            conversation_history[chat_id] = [get_system_prompt()]
+
+        conversation_history[chat_id].append({"role": "user", "content": query})
+        if len(conversation_history[chat_id]) > 6:
+            conversation_history[chat_id] = [get_system_prompt()] + conversation_history[chat_id][-5:]
+
+        api_task = asyncio.create_task(
+            asyncio.wait_for(make_ai_request(conversation_history[chat_id]), timeout=45.0)
+        )
+        anim_task = asyncio.create_task(animate_thinking(thinking_msg, api_task))
+
+        try:
+            response = await api_task
+        except asyncio.TimeoutError:
+            response = "⏰ **Timeout:** AI took too long. Try a shorter question."
+        finally:
+            if not anim_task.done():
+                anim_task.cancel()
+
+        if response.startswith(("❌", "⏳")):
+            await thinking_msg.edit(response)
+            return
+
+        conversation_history[chat_id].append({"role": "assistant", "content": response})
+
+        if len(response) > 3500:
+            parts = [response[i:i+3500] for i in range(0, len(response), 3500)]
+            await thinking_msg.edit(f"🤖 **PARADOX AI (Part 1/{len(parts)}):**\n\n{parts[0]}")
+            for i, part in enumerate(parts[1:], 2):
+                await event.respond(f"🤖 **Part {i}/{len(parts)}:**\n\n{part}")
+        else:
+            short_q = query[:100] + ("..." if len(query) > 100 else "")
+            await thinking_msg.edit(
+                f"🤖 **PARADOX AI:**\n\n{response}\n\n"
+                f"💭 **Query:** `{short_q}`"
+            )
+
+    except Exception as e:
+        if thinking_msg:
+            try:
+                await thinking_msg.edit(f"❌ **Error:** {str(e)}")
+            except Exception:
+                pass
+
+@CipherElite.on(events.NewMessage(pattern=r"\.paiset(?:\s+(.*))?"))
+@rishabh()
+async def aiset_handler(event):
+    try:
+        from plugins.ai_setup import ai_config
+        api_key = event.pattern_match.group(1)
+        if not api_key:
+            await event.reply("🔑 **Usage:** `.paiset <your_nvidia_api_key>`")
+            return
+
+        ai_config.set_nvidia_key(api_key.strip())
+        msg = await event.respond("✅ **NVIDIA API Key set successfully!**")
+        await asyncio.sleep(5)
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+    except Exception as e:
+        await event.reply(f"❌ **Error:** {str(e)}")
+
+@CipherElite.on(events.NewMessage(pattern=r"\.paigemini(?:\s+(.*))?"))
+@rishabh()
+async def aigemini_handler(event):
+    try:
+        from plugins.ai_setup import ai_config
+        api_key = event.pattern_match.group(1)
+        if not api_key:
+            await event.reply("🔑 **Usage:** `.paigemini <your_gemini_api_key>`")
+            return
+
+        ai_config.set_gemini_key(api_key.strip())
+        ai_config.set_provider("gemini")      # auto-switch to Gemini
+        msg = await event.respond("✅ **Gemini API Key set! Provider auto-switched to Gemini.**")
+        await asyncio.sleep(5)
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+    except Exception as e:
+        await event.reply(f"❌ **Error:** {str(e)}")
+
+@CipherElite.on(events.NewMessage(pattern=r"(?i)\.paimode(?:\s+(nvidia|gemini))?"))
+@rishabh()
+async def aimode_handler(event):
+    try:
+        from plugins.ai_setup import ai_config
+        mode = event.pattern_match.group(1)
+        if not mode:
+            await event.reply(
+                f"⚙️ **Usage:** `.paimode nvidia` or `.paimode gemini`\n\n"
+                f"Current provider: **{ai_config.get_provider().upper()}**"
+            )
+            return
+        ai_config.set_provider(mode.lower())
+        await event.reply(f"✅ **AI Provider switched to: {mode.upper()}**")
+    except Exception as e:
+        await event.reply(f"❌ **Error:** {str(e)}")
+
+@CipherElite.on(events.NewMessage(pattern=r"\.paitest"))
+@rishabh()
+async def aitest_handler(event):
+    try:
+        from plugins.ai_setup import ai_config
+        if not ai_config.is_enabled():
+            provider = ai_config.get_provider()
+            hint = "`.paigemini <key>`" if provider == "gemini" else "`.paiset <key>`"
+            await event.reply(f"❌ **No {provider.upper()} key set.** Use {hint} first.")
+            return
+
+        provider = ai_config.get_provider()
+        test_msg = await event.respond(f"🧪 **Testing {provider.upper()} API connection...**")
+        test_messages = [
+            get_system_prompt(),
+            {"role": "user", "content": "Say 'Hello, I am PARADOX AI!' in exactly those words."}
+        ]
+
+        response = await asyncio.wait_for(make_ai_request(test_messages), timeout=20.0)
+
+        if response.startswith(("❌", "⏳")):
+            await test_msg.edit(f"❌ **Test Failed:**\n\n{response}")
+        else:
+            await test_msg.edit(f"✅ **Test Successful!**\n\n🤖 **PARADOX AI:** {response}")
+    except Exception as e:
+        await event.reply(f"❌ **Test Error:** {str(e)}")
+
+@CipherElite.on(events.NewMessage(pattern=r"\.paiclear"))
+@rishabh()
+async def aiclear_handler(event):
+    try:
+        chat_id = event.chat_id
+        if chat_id in conversation_history:
+            count = len(conversation_history.pop(chat_id))
+            await event.reply(f"🗑️ **History cleared!** Removed `{count}` messages.")
+        else:
+            await event.reply("📭 **No history found** for this chat.")
+    except Exception as e:
+        await event.reply(f"❌ **Error:** {str(e)}")
+
+@CipherElite.on(events.NewMessage(pattern=r"\.paistatus"))
+@rishabh()
+async def aistatus_handler(event):
+    try:
+        from plugins.ai_setup import ai_config
+        provider    = ai_config.get_provider()
+        nvidia_key  = ai_config.get_nvidia_key()
+        gemini_key  = ai_config.get_gemini_key()
+        model       = GEMINI_DEFAULT_MODEL if provider == "gemini" else NVIDIA_DEFAULT_MODEL
+        history_cnt = len(conversation_history)
+        msg_cnt     = sum(len(h) for h in conversation_history.values())
+
+        await event.reply(
+            f"📊 **PARADOX AI Status:**\n\n"
+            f"⚡ **Active Provider:** `{provider.upper()}`\n"
+            f"🤖 **Model:** `{model}`\n"
+            f"📩 **Auto-responder:** `{AUTO_AI_STATE}`\n\n"
+            f"🔑 **NVIDIA Key:** `{'✅ Set' if nvidia_key else '❌ Not Set'}`\n"
+            f"🔑 **Gemini Key:** `{'✅ Set' if gemini_key else '❌ Not Set'}`\n\n"
+            f"💾 **Active Chats:** `{history_cnt}`\n"
+            f"💬 **Total Messages:** `{msg_cnt}`"
+        )
+    except Exception as e:
+        await event.reply(f"❌ **Error:** {str(e)}")
+
+print("✅ PARADOX AI Plugin loaded successfully")
