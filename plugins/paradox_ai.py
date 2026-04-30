@@ -18,20 +18,13 @@ from utils.utils import CipherElite
 from utils.decorators import rishabh
 from plugins.bot import add_handler
 
-# ── Provider constants ─────────────────────────────────────────────────────
-NVIDIA_BASE_URL    = "https://integrate.api.nvidia.com/v1"
+NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 NVIDIA_DEFAULT_MODEL = "mistralai/mistral-nemotron"
-
-GEMINI_BASE_URL    = "https://generativelanguage.googleapis.com/v1beta/openai/"
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 GEMINI_DEFAULT_MODEL = "gemini-2.0-flash"
 
-# ── Runtime state ──────────────────────────────────────────────────────────
 conversation_history = {}
 AUTO_AI_STATE = "OFF"   # "OFF" | "ALL"
-
-# ══════════════════════════════════════════════════════════════════
-#  Helpers
-# ══════════════════════════════════════════════════════════════════
 
 def get_system_prompt():
     current_time = datetime.now().strftime("%A, %B %d, %Y - %I:%M %p")
@@ -189,6 +182,22 @@ async def auto_reply_handler(event):
         print("Exception getting sender:", e)
         return
 
+    # Ignore outgoing messages (your own)
+    if event.out:
+        return
+
+    # Do not reply if user is approved (pmpermit)
+    db_path = "DB/assistant_db.json"
+    chat_id = str(event.chat_id)
+    if os.path.exists(db_path):
+        try:
+            with open(db_path, "r", encoding="utf-8") as f:
+                db = json.load(f)
+            if "approved_users" in db and chat_id in db["approved_users"]:
+                return
+        except Exception as e:
+            print("Exception checking approved users:", e)
+
     if event.text and event.text.startswith((".", "/", "!")):
         return
 
@@ -200,19 +209,19 @@ async def auto_reply_handler(event):
         await event.respond("I'm sorry, I can only understand and respond in English. Please message me in English for assistance.")
         return
 
-    chat_id = event.chat_id
-    if chat_id not in conversation_history:
-        conversation_history[chat_id] = [get_system_prompt()]
+    chat_id_int = event.chat_id
+    if chat_id_int not in conversation_history:
+        conversation_history[chat_id_int] = [get_system_prompt()]
 
-    conversation_history[chat_id].append({"role": "user", "content": text})
-    if len(conversation_history[chat_id]) > 5:
-        conversation_history[chat_id] = [get_system_prompt()] + conversation_history[chat_id][-4:]
+    conversation_history[chat_id_int].append({"role": "user", "content": text})
+    if len(conversation_history[chat_id_int]) > 5:
+        conversation_history[chat_id_int] = [get_system_prompt()] + conversation_history[chat_id_int][-4:]
 
     try:
         thinking_msg = await event.respond("**[░░░░░░░░░░]  0%** ⏳ `Connecting to PARADOX AI...`")
 
         api_task = asyncio.create_task(
-            asyncio.wait_for(make_ai_request(conversation_history[chat_id]), timeout=30.0)
+            asyncio.wait_for(make_ai_request(conversation_history[chat_id_int]), timeout=30.0)
         )
         anim_task = asyncio.create_task(animate_thinking(thinking_msg, api_task))
 
@@ -225,13 +234,12 @@ async def auto_reply_handler(event):
                 anim_task.cancel()
 
         if not str(response).startswith(("❌", "⏳")):
-            conversation_history[chat_id].append({"role": "assistant", "content": str(response)})
+            conversation_history[chat_id_int].append({"role": "assistant", "content": str(response)})
             await thinking_msg.edit(str(response))
         else:
             await thinking_msg.delete()
     except Exception as e:
         print("Exception in auto_reply_handler:", e)
-        pass
 
 @CipherElite.on(events.NewMessage(pattern=r"\.pai(?:\s+(.*))?"))
 @rishabh()
