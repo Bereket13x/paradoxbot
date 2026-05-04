@@ -19,7 +19,7 @@ import random
 from telethon import events
 from telethon.errors.rpcbaseerrors import ForbiddenError
 from telethon.errors.rpcerrorlist import PollOptionInvalidError
-from telethon.tl.types import InputMediaPoll, Poll, PollAnswer
+from telethon.tl.types import InputMediaPoll, Poll, PollAnswer, TextWithEntities
 
 from utils.utils import CipherElite
 from utils.decorators import rishabh
@@ -46,9 +46,15 @@ def init(client_instance):
 # ─── Helper ───────────────────────────────────────────────────────────────────
 
 def _build_poll(options: list[str]) -> list[PollAnswer]:
-    """Convert a list of option strings into Telethon PollAnswer objects."""
+    """
+    Convert a list of option strings into Telethon PollAnswer objects.
+    Telethon 1.24+ requires TextWithEntities for the text field.
+    """
     return [
-        PollAnswer(text=opt.strip(), option=bytes([i]))
+        PollAnswer(
+            text=TextWithEntities(text=opt.strip(), entities=[]),
+            option=bytes([i]),
+        )
         for i, opt in enumerate(options)
     ]
 
@@ -90,7 +96,7 @@ async def register_commands():
                     file=InputMediaPoll(
                         poll=Poll(
                             id=random.getrandbits(32),
-                            question=question,
+                            question=TextWithEntities(text=question, entities=[]),
                             answers=poll_answers,
                         )
                     ),
@@ -121,7 +127,10 @@ async def register_commands():
                     file=InputMediaPoll(
                         poll=Poll(
                             id=random.getrandbits(32),
-                            question="👆 So do you guys agree with this?",
+                            question=TextWithEntities(
+                                text="👆 So do you guys agree with this?",
+                                entities=[],
+                            ),
                             answers=default_options,
                         )
                     ),
