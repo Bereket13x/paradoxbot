@@ -17,16 +17,18 @@
 #  Thank you for respecting open-source software!
 # =============================================================================
 
+import html
+from datetime import datetime, timedelta, timezone
+
 from telethon import events
-from telethon.tl.types import (
-    UserStatusRecently, UserStatusOnline, UserStatusOffline,
-    UserStatusLastWeek, UserStatusLastMonth, Channel, Chat, User
-)
-from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.channels import GetFullChannelRequest
 from telethon.tl.functions.messages import GetFullChatRequest
-from datetime import datetime, timedelta, timezone
-import html
+from telethon.tl.functions.users import GetFullUserRequest
+from telethon.tl.types import (
+    Channel, Chat, User,
+    UserStatusLastMonth, UserStatusLastWeek,
+    UserStatusOffline, UserStatusOnline, UserStatusRecently,
+)
 
 from utils.utils import CipherElite
 from utils.decorators import rishabh
@@ -34,178 +36,305 @@ from plugins.bot import add_handler
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 📚  Command registration
+# 📚  Registration
 # ─────────────────────────────────────────────────────────────────────────────
+
 def init(client_instance):
     commands = [
-        ".info <username / user_id / reply>   - Show detailed Telegram user profile",
-        ".chatinfo <chat_username / chat_id>  - Show detailed group or channel info"
+        ".info <username / user_id / reply>   — Detailed Telegram user profile",
+        ".whois <username / user_id / reply>  — Alias for .info",
+        ".chatinfo [chat / reply]             — Detailed group or channel info",
     ]
-    description = (
-        "Advanced Telegram information commands.\n\n"
-        "🧩  Example usage:\n"
-        "    •  Reply to a message and send `.info` to inspect that user.\n"
-        "    •  Send `.chatinfo` in any group to analyse that group.\n"
-    )
+    description = "🔎 Info — Deep-scan any user, group, or channel"
     add_handler("info", commands, description)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 🛠  Helper functions
+# 🛠  Helpers
 # ─────────────────────────────────────────────────────────────────────────────
-def format_account_age(creation_date):
-    if not creation_date:
+
+def _safe(text) -> str:
+    return html.escape(str(text)) if text else "N/A"
+
+
+def _flag(val: bool, yes="✅", no="❌") -> str:
+    return yes if val else no
+
+
+def _account_age(date) -> str:
+    if not date:
         return "Unknown"
-    if creation_date.tzinfo is None:
-        creation_date = creation_date.replace(tzinfo=timezone.utc)
-    now = datetime.now(timezone.utc)
-    age = now - creation_date
-    years, rem_days = divmod(age.days, 365)
-    months, days = divmod(rem_days, 30)
+    if date.tzinfo is None:
+        date = date.replace(tzinfo=timezone.utc)
+    delta = datetime.now(timezone.utc) - date
+    years, rem   = divmod(delta.days, 365)
+    months, days = divmod(rem, 30)
     parts = []
-    if years:
-        parts.append(f"{years} year{'s' if years > 1 else ''}")
-    if months:
-        parts.append(f"{months} month{'s' if months > 1 else ''}")
-    if days:
-        parts.append(f"{days} day{'s' if days > 1 else ''}")
-    return ", ".join(parts) or "Just created"
+    if years:  parts.append(f"{years}y")
+    if months: parts.append(f"{months}mo")
+    if days:   parts.append(f"{days}d")
+    return " ".join(parts) or "Just created"
 
 
-def format_online_status(user: User):
-    if not hasattr(user, 'status'):
-        return "⚫ Status Unknown"
-
-    status_map = {
-        UserStatusOnline: "🟢 Online now",
-        UserStatusRecently: "🟢 Recently online",
-        UserStatusLastWeek: "🟠 Active this week",
-        UserStatusLastMonth: "🔴 Active this month",
-        UserStatusOffline: "⚫ Offline"
-    }
-
-    status_type = type(user.status)
-    text = status_map.get(status_type, "⚫ Status Unknown")
-
-    if status_type is UserStatusOffline and hasattr(user.status, 'was_online'):
-        diff = datetime.now(timezone.utc) - user.status.was_online
+def _online_status(user: User) -> str:
+    s = getattr(user, "status", None)
+    if s is None:
+        return "⚫️ <i>Status hidden</i>"
+    if isinstance(s, UserStatusOnline):
+        return "🟢 <b>Online right now</b>"
+    if isinstance(s, UserStatusRecently):
+        return "🟡 Recently online"
+    if isinstance(s, UserStatusLastWeek):
+        return "🟠 Seen this week"
+    if isinstance(s, UserStatusLastMonth):
+        return "🔴 Seen this month"
+    if isinstance(s, UserStatusOffline):
+        was = s.was_online
+        diff = datetime.now(timezone.utc) - was
         if diff < timedelta(minutes=1):
-            return "🟢 Just now"
+            return "🟢 <b>Just now</b>"
         if diff < timedelta(hours=1):
-            return f"🟢 {diff.seconds // 60} min ago"
+            return f"🟡 {diff.seconds // 60} min ago"
         if diff < timedelta(days=1):
-            return f"🟠 {diff.seconds // 3600} h ago"
-        return f"🔴 {diff.days} d ago"
-
-    return text
-
-
-def safe(text: str | None) -> str:
-    return html.escape(text or "")
+            return f"🟠 {diff.seconds // 3600}h ago"
+        return f"🔴 {diff.days}d ago"
+    return "⚫️ Status unknown"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 👤  .info / .whois  (user analysis)
-# ─────────────────────────────────────────────────────────────────────────────
-@CipherElite.on(events.NewMessage(pattern=r"\.(?:whois|info)(?:\s|$)"))
-@rishabh()
-async def info_command(event):
-    await event.delete()
-
-    # Identify target user
-    if event.reply_to_msg_id:
-        reply = await event.get_reply_message()
-        user = await event.client.get_entity(reply.sender_id)
-    else:
-        parts = event.text.split(maxsplit=1)
-        if len(parts) == 2:
-            user = await event.client.get_entity(parts[1])
-        else:
-            return await event.respond("❌ Please supply a username, ID, or reply to a user!")
-
-    full = await event.client(GetFullUserRequest(user.id))
-    bio = safe(full.full_user.about) if full.full_user.about else "N/A"
-    try:
-      photos = await event.client.get_profile_photos(user, limit=1)
-    except:
-      photos= None
-    #mutual = len(await event.client.get_common_chats(user.id))
-
-    text = (
-        "👤 <b>TELEGRAM USER ANALYSIS</b>\n\n"
-        f"🆔 ID: <code>{user.id}</code>\n"
-        f"👤 Name: {safe(user.first_name)} {safe(user.last_name)}\n"
-        f"📝 Bio: {safe(full.full_user.about) if full.full_user.about else 'N/A'}\n"
-        f"⭐ Premium: {'✅' if getattr(user, 'premium', False) else '❌'}\n"
-        f"⚠️ Scam: {'✅' if getattr(user, 'scam', False) else '❌'}\n"
-        f"🛑 Fake: {'✅' if getattr(user, 'fake', False) else '❌'}\n"
-        f"🔐 Restricted: {'❌ Allowed' if not getattr(user, 'restricted', False) else '⚠️ Restricted'}\n"
-        f"🌍 Language: {safe(user.lang_code) if getattr(user, 'lang_code', None) else 'N/A'}\n"
-        f"🔖 Username: @{safe(user.username) if user.username else 'N/A'}\n\n"
-        "📊 <b>ACCOUNT STATUS</b>\n"
-        f"{format_online_status(user)}\n"
-        f"📅 Account age: {format_account_age(getattr(user, 'date', None))}\n"
-        f"🤖 Is bot: {'✅' if user.bot else '❌'}\n"
-        f"✅ Verified: {'✅' if user.verified else '❌'}\n"
-        f"🚫 Restricted: {'✅' if getattr(user, 'restricted', False) else '❌'}\n\n"
-        "📈 <b>ACTIVITY</b>\n"
-        f"📸 Profile photos: {len(await event.client.get_profile_photos(user))}\n"
-    )
-
-    if full.full_user.about:
-        text += f"\n📝 <b>BIO</b>\n{safe(full.full_user.about)}"
-
-    if photos:
-        await event.client.send_file(event.chat_id, photos[0], caption=text, parse_mode='html')
-    else:
-        await event.respond(text, parse_mode='html')
+def _divider(label: str = "") -> str:
+    if label:
+        return f"\n╔══〔 <b>{label}</b> 〕\n"
+    return "╚══════════════════\n"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 👥  .chatinfo  (group / channel analysis)
+# 👤  .info / .whois
 # ─────────────────────────────────────────────────────────────────────────────
-@CipherElite.on(events.NewMessage(pattern=r"\.chatinfo(?:\s|$)(.*)"))
-@rishabh()
-async def chatinfo_command(event):
-    await event.delete()
 
-    arg = event.pattern_match.group(1).strip()
-    if event.reply_to_msg_id:
-        reply = await event.get_reply_message()
-        entity = await event.client.get_entity(reply.to_id)
-    elif arg:
-        entity = await event.client.get_entity(arg)
-    else:
-        entity = await event.client.get_entity(event.chat_id)
+async def register_commands():
 
-    if not isinstance(entity, (Channel, Chat)):
-        return await event.respond("❌ Target is not a group or channel!")
+    @CipherElite.on(events.NewMessage(pattern=r"^\.(?:info|whois)(?:\s|$)(.*)"))
+    @rishabh()
+    async def info_command(event):
+        await event.delete()
+        arg = (event.pattern_match.group(1) or "").strip()
 
-    full = (await event.client(GetFullChannelRequest(entity))
-            if isinstance(entity, Channel)
-            else await event.client(GetFullChatRequest(entity.id)))
+        catevent = await event.respond("<code>🔍 Scanning user...</code>", parse_mode="html")
 
-    # Participant count
-    try:
-        members = len(await event.client.get_participants(entity, limit=0))
-    except Exception:
-        members = "Unknown"
+        try:
+            # ── Resolve target ────────────────────────────────────────────────
+            if event.reply_to_msg_id:
+                reply = await event.get_reply_message()
+                target = reply.sender_id
+            elif arg:
+                target = int(arg) if arg.lstrip("-").isdigit() else arg
+            else:
+                target = (await event.client.get_me()).id
 
-    text = (
-        "👥 <b>TELEGRAM GROUP ANALYSIS</b>\n\n"
-        f"📛 Title: {safe(entity.title)}\n"
-        f"🆔 ID: <code>{entity.id}</code>\n"
-        f"🔗 Invite: {'https://t.me/' + entity.username if entity.username else 'N/A'}\n\n"
-        "📊 <b>STATS</b>\n"
-        f"👥 Members: {members}\n"
-        f"📢 Type: {'Channel' if getattr(entity, 'broadcast', False) else 'Group'}\n"
-        f"🔐 Visibility: {'Public' if entity.username else 'Private'}\n"
-        f"✅ Verified: {'✅' if getattr(entity, 'verified', False) else '❌'}\n"
-        f"💬 Scam: {'✅' if getattr(entity, 'scam', False) else '❌'}"
-    )
+            user   = await event.client.get_entity(target)
+            if not isinstance(user, User):
+                return await catevent.edit("❌ <b>Target is not a user.</b>", parse_mode="html")
 
-    if full.full_chat.about:
-        text += f"\n\n📝 <b>Description</b>\n{safe(full.full_chat.about)}"
+            full   = await event.client(GetFullUserRequest(user.id))
+            bio    = full.full_user.about or None
+            photos = await event.client.get_profile_photos(user)
+            photo_count = len(photos)
 
-    await event.respond(text, parse_mode='html')
+            # ── Build name & mention ──────────────────────────────────────────
+            first  = _safe(user.first_name)
+            last   = _safe(user.last_name) if user.last_name else ""
+            name   = f"{first} {last}".strip()
+            mention = f'<a href="tg://user?id={user.id}">{name}</a>'
+            uname   = f"@{_safe(user.username)}" if user.username else "—"
 
+            # ── Common chats (best-effort) ────────────────────────────────────
+            try:
+                common = await event.client.get_common_chats(user.id)
+                common_count = len(common)
+            except Exception:
+                common_count = "—"
+
+            # ── Compose message ───────────────────────────────────────────────
+            text = (
+                "┌─────────────────────────\n"
+                f"│  👤  <b>USER ANALYSIS</b>  —  PARADOX\n"
+                "└─────────────────────────\n"
+                "\n"
+                f"  <b>Name</b>     ›  {mention}\n"
+                f"  <b>Username</b> ›  {uname}\n"
+                f"  <b>User ID</b>  ›  <code>{user.id}</code>\n"
+                "\n"
+                "╔══〔 <b>ACCOUNT FLAGS</b> 〕\n"
+                f"║  🤖 Bot          ›  {_flag(user.bot)}\n"
+                f"║  ✅ Verified     ›  {_flag(user.verified)}\n"
+                f"║  ⭐ Premium      ›  {_flag(getattr(user, 'premium', False))}\n"
+                f"║  ⚠️ Scam         ›  {_flag(getattr(user, 'scam', False), '⚠️ Yes', '✅ No')}\n"
+                f"║  🛑 Fake         ›  {_flag(getattr(user, 'fake', False), '🛑 Yes', '✅ No')}\n"
+                f"║  🔒 Restricted   ›  {_flag(getattr(user, 'restricted', False), '⚠️ Yes', '✅ No')}\n"
+                "╚══════════════════\n"
+                "\n"
+                "╔══〔 <b>ACTIVITY</b> 〕\n"
+                f"║  📡 Status       ›  {_online_status(user)}\n"
+                f"║  📅 Acc. Age     ›  {_account_age(getattr(user, 'date', None))}\n"
+                f"║  🌍 Language     ›  {_safe(getattr(user, 'lang_code', None)) or '—'}\n"
+                f"║  📸 Photos       ›  {photo_count}\n"
+                f"║  👥 Mutual chats ›  {common_count}\n"
+                "╚══════════════════\n"
+            )
+
+            if bio:
+                text += (
+                    "\n"
+                    "╔══〔 <b>BIO</b> 〕\n"
+                    f"║  {_safe(bio)}\n"
+                    "╚══════════════════\n"
+                )
+
+            # ── Permanent profile link (ID-based, never changes) ──────────────
+            profile_link = f"tg://user?id={user.id}"
+
+            text += (
+                "\n"
+                "╔══〔 <b>PERMANENT LINK</b> 〕\n"
+                f'║  🔗 <a href="{profile_link}">tg://user?id={user.id}</a>\n'
+                "╚══════════════════\n"
+                "\n<i>Powered by PARADOX</i>"
+            )
+
+            await catevent.delete()
+            if photos:
+                await event.client.send_file(
+                    event.chat_id,
+                    photos[0],
+                    caption=text,
+                    parse_mode="html",
+                )
+            else:
+                await event.respond(text, parse_mode="html")
+
+        except Exception as e:
+            await catevent.edit(f"<b>❌ Error:</b>\n<code>{_safe(e)}</code>", parse_mode="html")
+
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # 👥  .chatinfo
+    # ─────────────────────────────────────────────────────────────────────────
+
+    @CipherElite.on(events.NewMessage(pattern=r"^\.chatinfo(?:\s|$)(.*)"))
+    @rishabh()
+    async def chatinfo_command(event):
+        await event.delete()
+        arg = (event.pattern_match.group(1) or "").strip()
+
+        catevent = await event.respond("<code>🔍 Scanning chat...</code>", parse_mode="html")
+
+        try:
+            # ── Resolve target ────────────────────────────────────────────────
+            if event.reply_to_msg_id:
+                reply  = await event.get_reply_message()
+                entity = await event.client.get_entity(reply.chat_id)
+            elif arg:
+                target = int(arg) if arg.lstrip("-").isdigit() else arg
+                entity = await event.client.get_entity(target)
+            else:
+                entity = await event.client.get_entity(event.chat_id)
+
+            if not isinstance(entity, (Channel, Chat)):
+                return await catevent.edit("❌ <b>Target is not a group or channel.</b>", parse_mode="html")
+
+            # ── Fetch full info ───────────────────────────────────────────────
+            if isinstance(entity, Channel):
+                full = await event.client(GetFullChannelRequest(entity))
+            else:
+                full = await event.client(GetFullChatRequest(entity.id))
+
+            description = (full.full_chat.about or "").strip()
+
+            # ── Member count ──────────────────────────────────────────────────
+            try:
+                members = full.full_chat.participants_count
+                if members is None:
+                    members = (await event.client.get_participants(entity, limit=0)).total
+            except Exception:
+                members = "—"
+
+            # ── Build flags ───────────────────────────────────────────────────
+            is_broadcast = getattr(entity, "broadcast", False)
+            is_megagroup = getattr(entity, "megagroup", False)
+            is_public    = bool(getattr(entity, "username", None))
+            is_verified  = getattr(entity, "verified", False)
+            is_scam      = getattr(entity, "scam", False)
+            is_fake      = getattr(entity, "fake", False)
+
+            if is_broadcast:
+                chat_type = "📢 Channel"
+            elif is_megagroup:
+                chat_type = "👥 Supergroup"
+            else:
+                chat_type = "💬 Group"
+
+            link = f"https://t.me/{entity.username}" if is_public else "Private (invite link only)"
+
+            # ── Compose ───────────────────────────────────────────────────────
+            text = (
+                "┌─────────────────────────\n"
+                f"│  👥  <b>CHAT ANALYSIS</b>  —  PARADOX\n"
+                "└─────────────────────────\n"
+                "\n"
+                f"  <b>Name</b>     ›  {_safe(entity.title)}\n"
+                f"  <b>Type</b>     ›  {chat_type}\n"
+                f"  <b>Chat ID</b>  ›  <code>{entity.id}</code>\n"
+                f"  <b>Link</b>     ›  {link}\n"
+                "\n"
+                "╔══〔 <b>STATISTICS</b> 〕\n"
+                f"║  👥 Members      ›  {members:,}" if isinstance(members, int) else f"║  👥 Members      ›  {members}"
+            )
+            text += (
+                "\n"
+                f"║  🔓 Visibility   ›  {'🌍 Public' if is_public else '🔒 Private'}\n"
+                f"║  ✅ Verified     ›  {_flag(is_verified)}\n"
+                f"║  ⚠️ Scam         ›  {_flag(is_scam, '⚠️ Yes', '✅ No')}\n"
+                f"║  🛑 Fake         ›  {_flag(is_fake, '🛑 Yes', '✅ No')}\n"
+                "╚══════════════════\n"
+            )
+
+            if description:
+                text += (
+                    "\n"
+                    "╔══〔 <b>DESCRIPTION</b> 〕\n"
+                    f"║  {_safe(description)}\n"
+                    "╚══════════════════\n"
+                )
+
+            # ── Permanent chat link ───────────────────────────────────────────
+            if is_public:
+                chat_link_display = f"https://t.me/{entity.username}"
+            else:
+                chat_link_display = "Private (no public link)"
+
+            text += (
+                "\n"
+                "╔══〔 <b>CHAT LINK</b> 〕\n"
+                f'║  🔗 {f"<a href=\'https://t.me/{entity.username}\'>https://t.me/{entity.username}</a>" if is_public else "Private (no public link)"}\n'
+                "╚══════════════════\n"
+                "\n<i>Powered by PARADOX</i>"
+            )
+
+            # ── Send with photo if available ──────────────────────────────────
+            await catevent.delete()
+            try:
+                photos = await event.client.get_profile_photos(entity, limit=1)
+                if photos:
+                    await event.client.send_file(
+                        event.chat_id,
+                        photos[0],
+                        caption=text,
+                        parse_mode="html",
+                    )
+                    return
+            except Exception:
+                pass
+            await event.respond(text, parse_mode="html")
+
+        except Exception as e:
+            await catevent.edit(f"<b>❌ Error:</b>\n<code>{_safe(e)}</code>", parse_mode="html")
