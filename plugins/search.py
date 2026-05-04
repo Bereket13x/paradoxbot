@@ -110,16 +110,41 @@ def _cleanup(paths):
 
 
 def _upload_image(file_path):
-    """Upload image to catbox.moe and return public URL. Tested & confirmed working."""
-    with open(file_path, "rb") as f:
-        res = requests.post(
-            "https://catbox.moe/user/api.php",
-            data={"reqtype": "fileupload"},
-            files={"fileToUpload": f},
-            timeout=30
-        )
-    if res.status_code == 200 and res.text.startswith("https://"):
-        return res.text.strip()
+    """Upload image using multiple fallback services."""
+    # Method 1: catbox.moe
+    try:
+        with open(file_path, "rb") as f:
+            res = requests.post(
+                "https://catbox.moe/user/api.php",
+                data={"reqtype": "fileupload"},
+                files={"fileToUpload": f},
+                timeout=30
+            )
+        if res.status_code == 200 and res.text.strip().startswith("https://"):
+            return res.text.strip()
+        print(f"[search] Catbox failed: {res.status_code} {res.text[:100]}")
+    except Exception as e:
+        print(f"[search] Catbox error: {e}")
+
+    # Method 2: tmpfiles.org
+    try:
+        import json
+        with open(file_path, "rb") as f:
+            res = requests.post(
+                "https://tmpfiles.org/api/v1/upload",
+                files={"file": f},
+                timeout=30
+            )
+        data = res.json()
+        if data.get("status") == "success":
+            # Convert from http://tmpfiles.org/XXXXX/file.jpg
+            # to direct URL http://tmpfiles.org/dl/XXXXX/file.jpg
+            url = data["data"]["url"].replace("tmpfiles.org/", "tmpfiles.org/dl/")
+            return url
+        print(f"[search] tmpfiles failed: {res.text[:100]}")
+    except Exception as e:
+        print(f"[search] tmpfiles error: {e}")
+
     return None
 
 
