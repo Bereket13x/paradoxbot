@@ -19,14 +19,7 @@ import random
 from telethon import events
 from telethon.errors.rpcbaseerrors import ForbiddenError
 from telethon.errors.rpcerrorlist import PollOptionInvalidError
-from telethon.tl.functions.messages import SendMediaRequest
-from telethon.tl.types import (
-    InputMediaPoll,
-    InputReplyToMessage,
-    Poll,
-    PollAnswer,
-    TextWithEntities,
-)
+from telethon.tl import types
 
 from utils.utils import CipherElite
 from utils.decorators import rishabh
@@ -52,33 +45,52 @@ def init(client_instance):
 
 # ─── Helper ───────────────────────────────────────────────────────────────────
 
-def _build_poll(options: list[str]) -> list[PollAnswer]:
+def _make_question(text: str):
     """
-    Convert option strings into Telethon PollAnswer objects.
-    Telethon 1.24+ requires TextWithEntities for the text field.
+    Returns the correct question type for the installed Telethon version.
+    Telethon >= 1.24 (Layer 166+): question must be TextWithEntities.
+    Older versions:                question is a plain string.
+    """
+    try:
+        return types.TextWithEntities(text=text, entities=[])
+    except AttributeError:
+        return text
+
+
+def _make_answer_text(text: str):
+    """Same logic for PollAnswer.text field."""
+    try:
+        return types.TextWithEntities(text=text.strip(), entities=[])
+    except AttributeError:
+        return text.strip()
+
+
+def _build_poll(options: list[str]) -> list:
+    """
+    Convert option strings into PollAnswer objects.
+    Uses ASCII-encoded index bytes: b'0', b'1', ... b'9'
+    (null bytes and raw ints cause MEDIA_INVALID on some layers).
     """
     return [
-        PollAnswer(
-            text=TextWithEntities(text=opt.strip(), entities=[]),
-            option=bytes([i]),
+        types.PollAnswer(
+            text=_make_answer_text(opt),
+            option=str(i).encode(),   # b'0', b'1', ...
         )
         for i, opt in enumerate(options)
     ]
 
 
-async def _send_poll(client, peer, reply_to_id: int, poll: Poll):
-    """
-    Use SendMediaRequest directly — the only reliable way to send polls
-    in Telethon 1.24+ without triggering MEDIA_INVALID errors.
-    """
-    reply_to = InputReplyToMessage(reply_to_msg_id=reply_to_id) if reply_to_id else None
-    await client(
-        SendMediaRequest(
-            peer=peer,
-            media=InputMediaPoll(poll=poll),
-            message="",
-            random_id=random.getrandbits(63),
-            reply_to=reply_to,
+def _build_media(question: str, answers: list) -> types.InputMediaPoll:
+    """Wrap a Poll in InputMediaPoll. id=0 lets Telegram assign the real ID."""
+    return types.InputMediaPoll(
+        poll=types.Poll(
+            id=0,
+            question=_make_question(question),
+            answers=answers,
+            closed=False,
+            public_voters=False,
+            multiple_choice=False,
+            quiz=False,
         )
     )
 
@@ -91,9 +103,8 @@ async def register_commands():
     @rishabh()
     async def poll_creator(event):
         """Create a poll — custom or default."""
-        input_str  = event.pattern_match.group(1).strip()
-        reply_to   = event.reply_to_msg_id or None
-        peer       = await event.get_input_chat()
+        input_str = event.pattern_match.group(1).strip()
+        reply_to  = event.reply_to_msg_id or event.id
 
         if input_str:
             # ── Custom poll ──────────────────────────────────────────────────
@@ -113,18 +124,18 @@ async def register_commands():
                     "Telegram only allows a maximum of **10** options per poll."
                 )
 
-            poll = Poll(
-                id=random.getrandbits(32),
-                question=TextWithEntities(text=question, entities=[]),
-                answers=_build_poll(options),
-            )
-
             try:
-                await _send_poll(event.client, peer, reply_to, poll)
+                media = _build_media(question, _build_poll(options))
+                await event.client.send_message(
+                    event.chat_id,
+                    file=media,
+                    reply_to=reply_to,
+                )
                 await event.delete()
+
             except PollOptionInvalidError:
                 await event.reply(
-                    "❌ `One or more poll options contain invalid data (possibly too long).`"
+                    "❌ `One or more options are too long or contain invalid data.`"
                 )
             except ForbiddenError:
                 await event.reply("`❌ Polls are not allowed in this chat.`")
@@ -133,25 +144,22 @@ async def register_commands():
 
         else:
             # ── Default poll ─────────────────────────────────────────────────
-            poll = Poll(
-                id=random.getrandbits(32),
-                question=TextWithEntities(
-                    text="👆 So do you guys agree with this?",
-                    entities=[],
-                ),
-                answers=_build_poll([
-                    "Yeah, sure! 😊✌️",
-                    "Nah 😏😕",
-                    "Whatever 🥱🙄",
-                ]),
-            )
-
             try:
-                await _send_poll(event.client, peer, reply_to, poll)
+                media = _build_media(
+                    "👆 So do you guys agree with this?",
+                    _build_poll(["Yeah, sure! 😊✌️", "Nah 😏😕", "Whatever 🥱🙄"]),
+                )
+                await event.client.send_message(
+                    event.chat_id,
+                    file=media,
+                    reply_to=reply_to,
+                )
                 await event.delete()
+
             except PollOptionInvalidError:
-                await event.reply("❌ `One or more poll options contain invalid data.`")
+                await event.reply("❌ `Poll option invalid data.`")
             except ForbiddenError:
                 await event.reply("`❌ Polls are not allowed in this chat.`")
             except Exception as e:
                 await event.reply(f"**❌ Error:**\n`{e}`")
+
