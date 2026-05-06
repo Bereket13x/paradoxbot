@@ -9,18 +9,16 @@
 #
 #  DESCRIPTION:
 #    Automatically monitors Twitter/X accounts and posts new tweets
-#    (with full media support: photos, videos, multi-media albums) to
-#    any Telegram chat.
+#    (with full media support) to any Telegram chat.
+#    Uses Nitter RSS — completely FREE, no API key required.
 #
 #  SETUP:
-#    Use the in-bot command once:
-#      .twsetup <your_bearer_token>
-#
-#    Token is saved to DB/ and persists across bot updates.
-#    Get a free Bearer Token at: https://developer.twitter.com/
+#    No setup needed! Just run:
+#      .twmonitor add @username -100xxxxxxxxx
 # =============================================================================
 
 import os
+import re
 import json
 import asyncio
 import tempfile
@@ -28,6 +26,8 @@ import aiohttp
 import aiofiles
 from pathlib import Path
 from datetime import datetime, timezone
+from urllib.parse import unquote
+import xml.etree.ElementTree as ET
 
 from telethon import events
 from telethon.errors import FloodWaitError
@@ -42,35 +42,24 @@ from plugins.bot import add_handler
 
 POLL_INTERVAL = 120  # seconds between checks per account
 
-# Token is loaded dynamically from DB (set via .twsetup) or env var fallback.
-# Always call _get_token() instead of using a global directly.
-def _get_token() -> str:
-    db = _load_db()
-    return db.get("bearer_token") or os.getenv("TWITTER_BEARER_TOKEN", "")
+# Public Nitter instances — tried in order, first success wins
+NITTER_INSTANCES = [
+    "https://nitter.privacydev.net",
+    "https://nitter.poast.org",
+    "https://nitter.1d4.us",
+    "https://nitter.net",
+    "https://nitter.unixfox.eu",
+    "https://nitter.kaitabababa.com",
+]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DATABASE  (DB/twitter_monitor.json)
-# Stores bearer token + all monitor configs in one persistent file.
-# This file lives in DB/ which is NOT overwritten on bot updates.
 # ─────────────────────────────────────────────────────────────────────────────
 
 DB_DIR = Path("DB")
 DB_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DB_DIR / "twitter_monitor.json"
 
-# Schema:
-# {
-#   "bearer_token": "AAAA...",            ← saved by .twsetup (persists updates)
-#   "monitors": {
-#     "<twitter_username_lower>": {
-#       "username": "realUsername",
-#       "display_name": "Real Name",
-#       "user_id": "1234567890",
-#       "targets": ["-100xxx", "-100yyy"],
-#       "last_tweet_id": "1234567890123456789"
-#     }
-#   }
-# }
 
 def _load_db() -> dict:
     if DB_PATH.exists():
@@ -88,118 +77,136 @@ def _save_db(db: dict):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# TWITTER API v2 HELPERS
+# NITTER RSS HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 
-TWITTER_API_BASE = "https://api.twitter.com/2"
+def _extract_tweet_id(url: str) -> str | None:
+    m = re.search(r"/status/(\d+)", url)
+    return m.group(1) if m else None
 
-def _headers() -> dict:
-    return {"Authorization": f"Bearer {_get_token()}"}
+
+def _nitter_pic_to_direct(url: str, instance: str) -> str:
+    """Convert Nitter image proxy URL to direct pbs.twimg.com URL."""
+    path = url.replace(instance, "").replace("https://nitter.net", "")
+    if path.startswith("/pic/"):
+        path = unquote(path[5:])  # strip /pic/ and URL-decode
+        if path.startswith("orig/"):
+            path = path[5:]
+        return f"https://pbs.twimg.com/{path}"
+    return url
 
 
-async def _api_get(session: aiohttp.ClientSession, path: str, params: dict) -> dict | None:
-    """Perform a GET request against the Twitter v2 API."""
+def _extract_media(description_html: str, instance: str) -> list[dict]:
+    """Extract photo/video URLs from a Nitter RSS item description."""
+    media = []
+    for url in re.findall(r'<img[^>]+src=["\']([^"\']+)["\']', description_html):
+        if "/pic/" in url or "twimg.com" in url:
+            media.append({"type": "photo", "url": _nitter_pic_to_direct(url, instance)})
+    for url in re.findall(r'<source[^>]+src=["\']([^"\']+)["\']', description_html):
+        media.append({"type": "video", "url": url})
+    return media
+
+
+def _parse_rss(xml_text: str, instance: str) -> tuple[list[dict], str | None]:
+    """Parse Nitter RSS XML. Returns (tweets, display_name)."""
+    tweets = []
+    display_name = None
     try:
-        async with session.get(
-            f"{TWITTER_API_BASE}{path}",
-            headers=_headers(),
-            params=params,
-            timeout=aiohttp.ClientTimeout(total=20),
-        ) as resp:
-            if resp.status == 200:
-                return await resp.json()
-            return None
-    except Exception:
-        return None
+        root = ET.fromstring(xml_text)
+        channel = root.find("channel")
+        if channel is None:
+            return [], None
+
+        title = channel.findtext("title", "")
+        if " / " in title:
+            display_name = title.split(" / ", 1)[1]
+        else:
+            display_name = title
+
+        for item in channel.findall("item"):
+            title_text = item.findtext("title", "")
+            link = item.findtext("link", "")
+            pub_date = item.findtext("pubDate", "")
+            description = item.findtext("description", "")
+
+            # Skip retweets and replies
+            if title_text.startswith("RT by ") or title_text.startswith("R to "):
+                continue
+
+            tweet_id = _extract_tweet_id(link)
+            if not tweet_id:
+                continue
+
+            # Normalise link to twitter.com
+            twitter_link = re.sub(r"https?://[^/]+", "https://twitter.com", link)
+
+            try:
+                dt = datetime.strptime(pub_date, "%a, %d %b %Y %H:%M:%S %Z")
+                time_str = dt.replace(tzinfo=timezone.utc).strftime("%d %b %Y • %H:%M UTC")
+            except Exception:
+                time_str = pub_date
+
+            tweets.append({
+                "id": tweet_id,
+                "text": title_text,
+                "url": twitter_link,
+                "time_str": time_str,
+                "_media": _extract_media(description, instance),
+            })
+    except Exception as e:
+        print(f"[twitter] RSS parse error: {e}")
+
+    return tweets, display_name
+
+
+async def _fetch_nitter_rss(username: str) -> tuple[list[dict], str | None]:
+    """Fetch RSS from Nitter, trying multiple instances. Returns (tweets, display_name)."""
+    username = username.lstrip("@")
+    for instance in NITTER_INSTANCES:
+        try:
+            url = f"{instance}/{username}/rss"
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    url,
+                    timeout=aiohttp.ClientTimeout(total=15),
+                    headers={"User-Agent": "Mozilla/5.0"},
+                ) as resp:
+                    if resp.status == 200:
+                        text = await resp.text()
+                        tweets, display_name = _parse_rss(text, instance)
+                        return tweets, display_name
+        except Exception as e:
+            print(f"[twitter] Nitter {instance} failed: {e}")
+    return [], None
 
 
 async def resolve_twitter_user(username: str) -> tuple[str | None, str | None]:
-    """
-    Resolve a Twitter username to (user_id, display_name).
-    Returns (None, None) on failure.
-    """
-    async with aiohttp.ClientSession() as session:
-        data = await _api_get(
-            session,
-            f"/users/by/username/{username.lstrip('@')}",
-            {"user.fields": "name,username"},
-        )
-    if data and "data" in data:
-        return data["data"]["id"], data["data"]["name"]
+    """Check a Twitter username exists via Nitter. Returns (username, display_name) or (None, None)."""
+    _, display_name = await _fetch_nitter_rss(username)
+    if display_name is not None:
+        return username.lstrip("@"), display_name or username
     return None, None
-
-
-async def fetch_latest_tweets(
-    user_id: str,
-    since_id: str | None = None,
-    max_results: int = 5,
-) -> list[dict]:
-    """
-    Fetch the most recent tweets from a user, optionally newer than since_id.
-    Returns a list of tweet dicts (newest last so we process in chronological order).
-    """
-    params = {
-        "max_results": max_results,
-        "tweet.fields": "created_at,text,attachments,entities",
-        "expansions": "attachments.media_keys,author_id",
-        "media.fields": "type,url,preview_image_url,variants",
-        "exclude": "retweets,replies",
-    }
-    if since_id:
-        params["since_id"] = since_id
-
-    async with aiohttp.ClientSession() as session:
-        data = await _api_get(session, f"/users/{user_id}/tweets", params)
-
-    if not data or "data" not in data:
-        return []
-
-    tweets = data["data"]
-
-    # Build a media_key → media_info lookup
-    media_map: dict[str, dict] = {}
-    if "includes" in data and "media" in data["includes"]:
-        for m in data["includes"]["media"]:
-            media_map[m["media_key"]] = m
-
-    # Attach media info directly into each tweet dict
-    for tweet in tweets:
-        tweet["_media"] = []
-        keys = (tweet.get("attachments") or {}).get("media_keys", [])
-        for key in keys:
-            if key in media_map:
-                tweet["_media"].append(media_map[key])
-
-    # Oldest first so messages appear in correct order in Telegram
-    tweets.reverse()
-    return tweets
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MEDIA DOWNLOAD HELPERS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _best_video_url(media: dict) -> str | None:
-    """Pick the highest-bitrate mp4 from a video media object."""
-    variants = media.get("variants") or []
-    mp4s = [v for v in variants if v.get("content_type") == "video/mp4"]
-    if not mp4s:
-        return None
-    return max(mp4s, key=lambda v: v.get("bit_rate", 0))["url"]
-
-
 async def _download_file(url: str, suffix: str) -> str | None:
-    """Download a URL to a temp file. Returns path or None."""
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=60)) as resp:
+            async with session.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=60),
+                headers={"User-Agent": "Mozilla/5.0"},
+            ) as resp:
                 if resp.status != 200:
                     return None
                 tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
                 tmp_path = tmp.name
                 tmp.close()
                 async with aiofiles.open(tmp_path, "wb") as f:
-                    async for chunk in resp.content.iter_chunked(1024 * 64):
+                    async for chunk in resp.content.iter_chunked(65536):
                         await f.write(chunk)
         return tmp_path
     except Exception:
@@ -207,25 +214,15 @@ async def _download_file(url: str, suffix: str) -> str | None:
 
 
 async def _get_media_files(media_list: list[dict]) -> list[str]:
-    """
-    Download all media items to temp files.
-    Returns list of local file paths.
-    """
     paths = []
     for media in media_list:
-        mtype = media.get("type", "")
-        if mtype == "photo":
-            url = media.get("url")
-            if url:
-                path = await _download_file(url, ".jpg")
-                if path:
-                    paths.append(path)
-        elif mtype in ("video", "animated_gif"):
-            url = _best_video_url(media)
-            if url:
-                path = await _download_file(url, ".mp4")
-                if path:
-                    paths.append(path)
+        url = media.get("url", "")
+        if not url:
+            continue
+        suffix = ".mp4" if media.get("type") == "video" else ".jpg"
+        path = await _download_file(url, suffix)
+        if path:
+            paths.append(path)
     return paths
 
 
@@ -234,70 +231,31 @@ async def _get_media_files(media_list: list[dict]) -> list[str]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _format_caption(tweet: dict, username: str, display_name: str) -> str:
-    """Build the Telegram caption for a tweet."""
-    text = tweet.get("text", "")
-    tweet_id = tweet.get("id", "")
-    created = tweet.get("created_at", "")
-
-    # Parse timestamp
-    try:
-        dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
-        time_str = dt.strftime("%d %b %Y • %H:%M UTC")
-    except Exception:
-        time_str = created
-
-    tweet_url = f"https://twitter.com/{username}/status/{tweet_id}"
-
     caption = (
         f"🐦 <b>New Tweet from <a href=\"https://twitter.com/{username}\">"
         f"{display_name} (@{username})</a></b>\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"{text}\n"
+        f"{tweet.get('text', '')}\n"
         f"━━━━━━━━━━━━━━━━━━━━\n"
-        f"🕐 <i>{time_str}</i>\n"
-        f"🔗 <a href=\"{tweet_url}\">View on X/Twitter</a>\n\n"
+        f"🕐 <i>{tweet.get('time_str', '')}</i>\n"
+        f"🔗 <a href=\"{tweet.get('url', '')}\">View on X/Twitter</a>\n\n"
         f"<i>Powered by PARADOX</i>"
     )
     return caption
 
 
 async def _post_tweet_to_telegram(client, target_id: int, tweet: dict, username: str, display_name: str):
-    """Send a single tweet (with media) to a Telegram chat."""
     caption = _format_caption(tweet, username, display_name)
-    media_list = tweet.get("_media", [])
-
-    if not media_list:
-        # Text-only tweet
-        await client.send_message(target_id, caption, parse_mode="html", link_preview=False)
-        return
-
-    # Download media
-    files = await _get_media_files(media_list)
-
-    if not files:
-        # Media failed to download — post text only
-        await client.send_message(target_id, caption, parse_mode="html", link_preview=False)
-        return
+    files = await _get_media_files(tweet.get("_media", []))
 
     try:
-        if len(files) == 1:
-            await client.send_file(
-                target_id,
-                files[0],
-                caption=caption,
-                parse_mode="html",
-            )
+        if not files:
+            await client.send_message(target_id, caption, parse_mode="html", link_preview=False)
+        elif len(files) == 1:
+            await client.send_file(target_id, files[0], caption=caption, parse_mode="html")
         else:
-            # Multiple files — send as album; caption only on first file
-            captions = [caption] + [""] * (len(files) - 1)
-            await client.send_file(
-                target_id,
-                files,
-                caption=captions,
-                parse_mode="html",
-            )
+            await client.send_file(target_id, files, caption=[caption] + [""] * (len(files) - 1), parse_mode="html")
     finally:
-        # Clean up temp files
         for fp in files:
             try:
                 os.unlink(fp)
@@ -309,51 +267,42 @@ async def _post_tweet_to_telegram(client, target_id: int, tweet: dict, username:
 # POLLING ENGINE
 # ─────────────────────────────────────────────────────────────────────────────
 
-_poll_tasks: dict[str, asyncio.Task] = {}  # username_lower → asyncio.Task
+_poll_tasks: dict[str, asyncio.Task] = {}
 
 
 async def _poll_account(client, username_lower: str):
-    """Background task that continuously polls one Twitter account."""
     while True:
         try:
             db = _load_db()
             monitor = db["monitors"].get(username_lower)
-
             if not monitor:
-                # Monitor was removed — exit task
                 break
 
-            user_id = monitor["user_id"]
-            display_name = monitor.get("display_name", monitor["username"])
+            username = monitor["username"]
+            display_name = monitor.get("display_name", username)
             targets = monitor.get("targets", [])
             last_id = monitor.get("last_tweet_id")
 
-            if not targets:
-                await asyncio.sleep(POLL_INTERVAL)
-                continue
+            if targets:
+                tweets, _ = await _fetch_nitter_rss(username)
+                new_tweets = sorted(
+                    [t for t in tweets if not last_id or t["id"] > last_id],
+                    key=lambda t: t["id"],
+                )
 
-            tweets = await fetch_latest_tweets(user_id, since_id=last_id, max_results=10)
+                if new_tweets:
+                    db["monitors"][username_lower]["last_tweet_id"] = new_tweets[-1]["id"]
+                    _save_db(db)
 
-            if tweets:
-                # Update last tweet ID to the newest one (last in chronological list)
-                db["monitors"][username_lower]["last_tweet_id"] = tweets[-1]["id"]
-                _save_db(db)
-
-                for tweet in tweets:
-                    for target_str in targets:
-                        try:
-                            await _post_tweet_to_telegram(
-                                client,
-                                int(target_str),
-                                tweet,
-                                monitor["username"],
-                                display_name,
-                            )
-                            await asyncio.sleep(1.5)
-                        except FloodWaitError as e:
-                            await asyncio.sleep(e.seconds + 5)
-                        except Exception as e:
-                            print(f"[twitter] post error for {username_lower}: {e}")
+                    for tweet in new_tweets:
+                        for target_str in targets:
+                            try:
+                                await _post_tweet_to_telegram(client, int(target_str), tweet, username, display_name)
+                                await asyncio.sleep(1.5)
+                            except FloodWaitError as e:
+                                await asyncio.sleep(e.seconds + 5)
+                            except Exception as e:
+                                print(f"[twitter] post error for {username_lower}: {e}")
 
         except asyncio.CancelledError:
             break
@@ -364,102 +313,43 @@ async def _poll_account(client, username_lower: str):
 
 
 def _start_monitor_task(client, username_lower: str):
-    """Start (or restart) the polling task for a username."""
-    # Cancel old task if running
     old = _poll_tasks.get(username_lower)
     if old and not old.done():
         old.cancel()
-    task = asyncio.ensure_future(_poll_account(client, username_lower))
-    _poll_tasks[username_lower] = task
+    _poll_tasks[username_lower] = asyncio.ensure_future(_poll_account(client, username_lower))
 
 
 def _stop_monitor_task(username_lower: str):
-    """Cancel the polling task for a username."""
     task = _poll_tasks.pop(username_lower, None)
     if task and not task.done():
         task.cancel()
 
 
 async def _resume_all_monitors(client):
-    """Re-start polling tasks for all monitors saved in DB (called at startup)."""
     db = _load_db()
     for username_lower in list(db["monitors"].keys()):
         _start_monitor_task(client, username_lower)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# HELP MENU  +  STARTUP
+# HELP MENU + STARTUP
 # ─────────────────────────────────────────────────────────────────────────────
 
 def init(client_instance):
     commands = [
-        ".twsetup <bearer_token>                          — Save your Twitter Bearer Token (once only)",
         ".twmonitor add <@twitter_user> <telegram_chat>  — Start auto-posting tweets",
-        ".twmonitor del <@twitter_user> [telegram_chat]  — Stop monitoring (all or specific chat)",
+        ".twmonitor del <@twitter_user> [telegram_chat]  — Stop monitoring",
         ".twmonitor list                                  — Show all active monitors",
-        ".twmonitor test <@twitter_user>                 — Post the latest tweet right now",
+        ".twmonitor test <@twitter_user>                 — Post the latest tweet now",
         ".twdl <tweet_url>                               — Download & send tweet media",
     ]
     description = (
         "🐦 <b>Twitter Monitor</b> — Auto-post tweets to Telegram\n"
-        "Supports photos, videos, multi-media albums & text.\n"
-        "Run <code>.twsetup &lt;token&gt;</code> once to configure."
+        "Supports photos, videos & text. No API key required.\n"
+        "Uses public Nitter RSS — completely free."
     )
     add_handler("twitter", commands, description)
-
-    # Schedule resume after event loop starts
     asyncio.ensure_future(_resume_all_monitors(client_instance))
-
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# COMMAND: .twsetup  — save bearer token to DB (persists across bot updates)
-# ─────────────────────────────────────────────────────────────────────────────
-
-@CipherElite.on(events.NewMessage(pattern=r"^\.twsetup(?:\s|$)(.*)"))
-@rishabh()
-async def twsetup_command(event):
-    await event.delete()
-
-    token = (event.pattern_match.group(1) or "").strip()
-
-    if not token:
-        db = _load_db()
-        current = db.get("bearer_token", "")
-        masked = f"{current[:10]}...{current[-5:]}" if len(current) > 15 else ("✅ Set" if current else "❌ Not set")
-        return await event.respond(
-            "🔑 <b>Twitter Bearer Token Setup</b>\n\n"
-            f"Current token: <code>{masked}</code>\n\n"
-            "To set/update your token:\n"
-            "<code>.twsetup YOUR_BEARER_TOKEN_HERE</code>\n\n"
-            "Get a free token at <a href=\"https://developer.twitter.com/\">developer.twitter.com</a>\n"
-            "<i>Your token is saved to the DB folder and persists across bot updates.</i>",
-            parse_mode="html",
-        )
-
-    # Basic format check (Bearer tokens start with AAAA and are long)
-    if len(token) < 50 or not token.startswith("AAAA"):
-        return await event.respond(
-            "❌ <b>That doesn't look like a valid Bearer Token.</b>\n\n"
-            "Bearer tokens start with <code>AAAA</code> and are very long.\n"
-            "Get yours at <a href=\"https://developer.twitter.com/\">developer.twitter.com</a>",
-            parse_mode="html",
-        )
-
-    # Save to DB
-    db = _load_db()
-    db["bearer_token"] = token
-    if "monitors" not in db:
-        db["monitors"] = {}
-    _save_db(db)
-
-    await event.respond(
-        "✅ <b>Twitter Bearer Token saved!</b>\n\n"
-        "Your token is stored in <code>DB/twitter_monitor.json</code> and will persist across bot updates.\n\n"
-        "You can now use:\n"
-        "<code>.twmonitor add @username -100xxxxxxxxx</code>",
-        parse_mode="html",
-    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -470,16 +360,6 @@ async def twsetup_command(event):
 @rishabh()
 async def twmonitor_command(event):
     await event.delete()
-
-    if not _get_token():
-        return await event.respond(
-            "❌ <b>Twitter Bearer Token not configured!</b>\n\n"
-            "Run this command first:\n"
-            "<code>.twsetup YOUR_BEARER_TOKEN_HERE</code>\n\n"
-            "Get a free token at <a href=\"https://developer.twitter.com/\">developer.twitter.com</a>",
-            parse_mode="html",
-        )
-
     args_raw = (event.pattern_match.group(1) or "").strip()
     parts = args_raw.split()
 
@@ -495,23 +375,19 @@ async def twmonitor_command(event):
                 "❌ <b>Usage:</b> <code>.twmonitor add &lt;@twitter_user&gt; &lt;telegram_chat_id&gt;</code>",
                 parse_mode="html",
             )
-
         tw_user = parts[1].lstrip("@")
-        tg_target = parts[2]
-
-        # Validate Telegram target
         try:
-            tg_id = int(tg_target)
+            tg_id = int(parts[2])
         except ValueError:
-            return await event.respond("❌ Telegram chat ID must be a number (e.g. <code>-1001234567890</code>).", parse_mode="html")
+            return await event.respond("❌ Telegram chat ID must be a number.", parse_mode="html")
 
-        status = await event.respond(f"🔍 <b>Resolving @{tw_user} on Twitter/X...</b>", parse_mode="html")
+        status = await event.respond(f"🔍 <b>Looking up @{tw_user} via Nitter...</b>", parse_mode="html")
 
         user_id, display_name = await resolve_twitter_user(tw_user)
         if not user_id:
             return await status.edit(
                 f"❌ <b>Could not find Twitter user @{tw_user}.</b>\n"
-                "Make sure the username is correct and your Bearer Token is valid.",
+                "Make sure the username is correct (Nitter may be temporarily down — try again).",
                 parse_mode="html",
             )
 
@@ -519,14 +395,12 @@ async def twmonitor_command(event):
         key = tw_user.lower()
 
         if key not in db["monitors"]:
-            # Fetch the most recent tweet ID so we don't re-post old tweets
-            tweets = await fetch_latest_tweets(user_id, max_results=1)
+            tweets, _ = await _fetch_nitter_rss(tw_user)
             last_id = tweets[0]["id"] if tweets else None
-
             db["monitors"][key] = {
                 "username": tw_user,
                 "display_name": display_name,
-                "user_id": user_id,
+                "user_id": key,
                 "targets": [],
                 "last_tweet_id": last_id,
             }
@@ -543,7 +417,7 @@ async def twmonitor_command(event):
             f"🐦 <b>Twitter:</b> <a href=\"https://twitter.com/{tw_user}\">@{tw_user}</a> ({display_name})\n"
             f"📩 <b>Telegram target:</b> <code>{tg_id}</code>\n"
             f"⏱ <b>Check interval:</b> every {POLL_INTERVAL}s\n\n"
-            f"<i>New tweets will be posted automatically with full media support.</i>",
+            f"<i>New tweets will be posted automatically.</i>",
             parse_mode="html",
         )
 
@@ -554,7 +428,6 @@ async def twmonitor_command(event):
                 "❌ <b>Usage:</b> <code>.twmonitor del &lt;@twitter_user&gt; [telegram_chat_id]</code>",
                 parse_mode="html",
             )
-
         tw_user = parts[1].lstrip("@")
         key = tw_user.lower()
         db = _load_db()
@@ -563,21 +436,17 @@ async def twmonitor_command(event):
             return await event.respond(f"⚠️ <b>@{tw_user}</b> is not being monitored.", parse_mode="html")
 
         if len(parts) >= 3:
-            # Remove only a specific target
             target_str = str(parts[2])
             if target_str in db["monitors"][key]["targets"]:
                 db["monitors"][key]["targets"].remove(target_str)
                 msg = f"🗑️ Removed target <code>{target_str}</code> from <b>@{tw_user}</b> monitor."
             else:
                 msg = f"⚠️ Target <code>{target_str}</code> was not in the monitor list."
-
-            # If no targets left, remove the whole monitor
             if not db["monitors"][key]["targets"]:
                 del db["monitors"][key]
                 _stop_monitor_task(key)
                 msg += "\n<i>No targets left — monitor fully stopped.</i>"
         else:
-            # Remove the whole monitor
             del db["monitors"][key]
             _stop_monitor_task(key)
             msg = f"🗑️ Monitor for <b>@{tw_user}</b> fully stopped and removed."
@@ -589,22 +458,16 @@ async def twmonitor_command(event):
     elif subcmd == "list":
         db = _load_db()
         monitors = db.get("monitors", {})
-
         if not monitors:
             return await event.respond("📭 <b>No active Twitter monitors.</b>", parse_mode="html")
 
         text = "🐦 <b>Active Twitter Monitors:</b>\n━━━━━━━━━━━━━━━━━━━━\n\n"
         for key, m in monitors.items():
             running = key in _poll_tasks and not _poll_tasks[key].done()
-            status_icon = "🟢" if running else "🔴"
-            text += (
-                f"{status_icon} <b><a href=\"https://twitter.com/{m['username']}\">@{m['username']}</a></b>"
-                f" ({m.get('display_name', '?')})\n"
-            )
+            text += f"{'🟢' if running else '🔴'} <b><a href=\"https://twitter.com/{m['username']}\">@{m['username']}</a></b> ({m.get('display_name', '?')})\n"
             for t in m.get("targets", []):
                 text += f"   └ 📩 <code>{t}</code>\n"
             text += f"   └ 🆔 Last tweet: <code>{m.get('last_tweet_id', 'none')}</code>\n\n"
-
         text += "<i>Powered by PARADOX</i>"
         await event.respond(text, parse_mode="html")
 
@@ -615,42 +478,31 @@ async def twmonitor_command(event):
                 "❌ <b>Usage:</b> <code>.twmonitor test &lt;@twitter_user&gt;</code>",
                 parse_mode="html",
             )
-
         tw_user = parts[1].lstrip("@")
         key = tw_user.lower()
         db = _load_db()
 
         if key not in db["monitors"]:
             return await event.respond(
-                f"⚠️ <b>@{tw_user}</b> is not in your monitor list.\n"
-                "Add it first with <code>.twmonitor add</code>.",
+                f"⚠️ <b>@{tw_user}</b> is not in your monitor list.\nAdd it first with <code>.twmonitor add</code>.",
                 parse_mode="html",
             )
 
         status = await event.respond(f"⏳ <b>Fetching latest tweet from @{tw_user}...</b>", parse_mode="html")
-
         m = db["monitors"][key]
-        tweets = await fetch_latest_tweets(m["user_id"], max_results=1)
+        tweets, _ = await _fetch_nitter_rss(tw_user)
 
         if not tweets:
-            return await status.edit("❌ Could not fetch any tweets. Is the account active?", parse_mode="html")
+            return await status.edit("❌ Could not fetch any tweets. Nitter may be down — try again.", parse_mode="html")
 
-        tweet = tweets[0]
         targets = m.get("targets", [])
         if not targets:
             return await status.edit("⚠️ No Telegram targets configured for this monitor.", parse_mode="html")
 
         await status.edit("📤 <b>Posting latest tweet to all targets...</b>", parse_mode="html")
-
         for target_str in targets:
             try:
-                await _post_tweet_to_telegram(
-                    event.client,
-                    int(target_str),
-                    tweet,
-                    m["username"],
-                    m.get("display_name", m["username"]),
-                )
+                await _post_tweet_to_telegram(event.client, int(target_str), tweets[0], m["username"], m.get("display_name", m["username"]))
             except Exception as e:
                 await event.respond(f"⚠️ Failed to post to <code>{target_str}</code>: <code>{e}</code>", parse_mode="html")
 
@@ -661,86 +513,50 @@ async def twmonitor_command(event):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# COMMAND: .twdl  (download any tweet media by URL)
+# COMMAND: .twdl
 # ─────────────────────────────────────────────────────────────────────────────
 
 @CipherElite.on(events.NewMessage(pattern=r"^\.twdl(?:\s|$)(.*)"))
 @rishabh()
 async def twdl_command(event):
     await event.delete()
-
     url_arg = (event.pattern_match.group(1) or "").strip()
     if not url_arg:
         return await event.respond("❌ <b>Usage:</b> <code>.twdl &lt;tweet_url&gt;</code>", parse_mode="html")
 
-    # Extract tweet ID from URL
-    import re
-    m = re.search(r"(?:twitter\.com|x\.com)/\w+/status/(\d+)", url_arg)
+    m = re.search(r"(?:twitter\.com|x\.com)/(\w+)/status/(\d+)", url_arg)
     if not m:
         return await event.respond("❌ <b>Invalid tweet URL.</b>", parse_mode="html")
 
-    tweet_id = m.group(1)
-    status = await event.respond("⬇️ <b>Fetching tweet media...</b>", parse_mode="html")
+    username, tweet_id = m.group(1), m.group(2)
+    status = await event.respond("⬇️ <b>Fetching tweet via Nitter...</b>", parse_mode="html")
 
-    async with aiohttp.ClientSession() as session:
-        data = await _api_get(
-            session,
-            f"/tweets/{tweet_id}",
-            {
-                "tweet.fields": "created_at,text,attachments",
-                "expansions": "attachments.media_keys,author_id",
-                "media.fields": "type,url,preview_image_url,variants",
-                "user.fields": "username,name",
-            },
-        )
+    tweets, display_name = await _fetch_nitter_rss(username)
+    tweet = next((t for t in tweets if t["id"] == tweet_id), None)
 
-    if not data or "data" not in data:
-        return await status.edit("❌ Could not fetch tweet. Check the URL or your Bearer Token.", parse_mode="html")
-
-    tweet = data["data"]
-
-    # Build media map
-    media_map = {}
-    if "includes" in data and "media" in data["includes"]:
-        for med in data["includes"]["media"]:
-            media_map[med["media_key"]] = med
-
-    tweet["_media"] = []
-    for key in (tweet.get("attachments") or {}).get("media_keys", []):
-        if key in media_map:
-            tweet["_media"].append(media_map[key])
-
-    # Resolve author
-    username = "unknown"
-    display_name = "Unknown"
-    if "includes" in data and "users" in data["includes"]:
-        u = data["includes"]["users"][0]
-        username = u.get("username", username)
-        display_name = u.get("name", display_name)
+    if not tweet:
+        return await status.edit("❌ Could not find this tweet via Nitter. Try a different URL.", parse_mode="html")
 
     if not tweet["_media"]:
-        # No media — just send text
         await status.edit(
             f"ℹ️ <b>No media found in this tweet.</b>\n\n{tweet.get('text', '')}",
             parse_mode="html",
         )
         return
 
-    await status.edit("📥 <b>Downloading media files...</b>", parse_mode="html")
+    await status.edit("📥 <b>Downloading media...</b>", parse_mode="html")
     files = await _get_media_files(tweet["_media"])
 
     if not files:
         return await status.edit("❌ Failed to download media from this tweet.", parse_mode="html")
 
-    caption = _format_caption(tweet, username, display_name)
-
+    caption = _format_caption(tweet, username, display_name or username)
     try:
         await status.edit("📤 <b>Uploading to Telegram...</b>", parse_mode="html")
         if len(files) == 1:
             await event.client.send_file(event.chat_id, files[0], caption=caption, parse_mode="html")
         else:
-            captions = [caption] + [""] * (len(files) - 1)
-            await event.client.send_file(event.chat_id, files, caption=captions, parse_mode="html")
+            await event.client.send_file(event.chat_id, files, caption=[caption] + [""] * (len(files) - 1), parse_mode="html")
         await status.delete()
     except Exception as e:
         await status.edit(f"❌ <b>Upload error:</b> <code>{e}</code>", parse_mode="html")
@@ -772,7 +588,6 @@ def _help_text() -> str:
         "• <code>.twdl &lt;tweet_url&gt;</code>\n"
         "  Download and send tweet photos/videos to this chat.\n\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        "⚙️ <b>Setup:</b> Add <code>TWITTER_BEARER_TOKEN=xxx</code> to your <code>.env</code>\n"
-        "Get a free token at <a href=\"https://developer.twitter.com/\">developer.twitter.com</a>\n\n"
+        "✅ <b>No API key required</b> — uses public Nitter RSS feeds.\n\n"
         "<i>Powered by PARADOX</i>"
     )
