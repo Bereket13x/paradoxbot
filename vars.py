@@ -31,6 +31,9 @@ PING_PIC = os.getenv("PING_PIC", _PARADOX_IMG)
 UPSTREAM_REPO = os.getenv("UPSTREAM_REPO", "https://github.com/Bereket13x/paradoxbot")  # set to your fork
 BRANCH = os.getenv("BRANCH", "main")
 
+# Twitter/X Integration
+TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN", "")
+
 # for  debugging dont edit this
 if API_ID == 0:
     print("Warning: API_ID is not set. Please update .env with a valid API_ID.")
