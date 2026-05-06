@@ -437,25 +437,12 @@ async def twsetup_command(event):
             parse_mode="html",
         )
 
-    # Validate by making a test API call
-    status = await event.respond("🔍 <b>Validating token...</b>", parse_mode="html")
-
-    async with aiohttp.ClientSession() as session:
-        async with session.get(
-            "https://api.twitter.com/2/users/by/username/twitter",
-            headers={"Authorization": f"Bearer {token}"},
-            params={"user.fields": "name"},
-            timeout=aiohttp.ClientTimeout(total=10),
-        ) as resp:
-            resp_data = await resp.json() if resp.status in (200, 401, 403) else {}
-            # This endpoint works on free tier with Bearer token App-Only auth
-            valid = resp.status == 200
-
-    if not valid:
-        err = resp_data.get("detail") or resp_data.get("title") or "Unknown error"
-        return await status.edit(
-            f"❌ <b>Token validation failed:</b> <code>{err}</code>\n\n"
-            "Make sure you copied the full Bearer Token correctly.",
+    # Basic format check (Bearer tokens start with AAAA and are long)
+    if len(token) < 50 or not token.startswith("AAAA"):
+        return await event.respond(
+            "❌ <b>That doesn't look like a valid Bearer Token.</b>\n\n"
+            "Bearer tokens start with <code>AAAA</code> and are very long.\n"
+            "Get yours at <a href=\"https://developer.twitter.com/\">developer.twitter.com</a>",
             parse_mode="html",
         )
 
@@ -466,7 +453,7 @@ async def twsetup_command(event):
         db["monitors"] = {}
     _save_db(db)
 
-    await status.edit(
+    await event.respond(
         "✅ <b>Twitter Bearer Token saved!</b>\n\n"
         "Your token is stored in <code>DB/twitter_monitor.json</code> and will persist across bot updates.\n\n"
         "You can now use:\n"
@@ -789,4 +776,3 @@ def _help_text() -> str:
         "Get a free token at <a href=\"https://developer.twitter.com/\">developer.twitter.com</a>\n\n"
         "<i>Powered by PARADOX</i>"
     )
-
