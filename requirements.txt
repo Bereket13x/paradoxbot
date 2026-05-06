@@ -104,3 +104,4 @@ webdriver-manager
 search-engine-parser
 telegraph
 urlextract
+tweepy==4.14.0
