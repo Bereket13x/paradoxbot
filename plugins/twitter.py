@@ -442,12 +442,14 @@ async def twsetup_command(event):
 
     async with aiohttp.ClientSession() as session:
         async with session.get(
-            "https://api.twitter.com/2/users/me",
+            "https://api.twitter.com/2/tweets/search/recent",
             headers={"Authorization": f"Bearer {token}"},
+            params={"query": "from:Twitter", "max_results": 10},
             timeout=aiohttp.ClientTimeout(total=10),
         ) as resp:
-            valid = resp.status == 200
-            resp_data = await resp.json() if resp.status in (200, 401, 403) else {}
+            resp_data = await resp.json() if resp.status in (200, 400, 401, 403) else {}
+            # 200 or 400 (bad query params but valid auth) both mean the token works
+            valid = resp.status in (200, 400)
 
     if not valid:
         err = resp_data.get("detail") or resp_data.get("title") or "Unknown error"
