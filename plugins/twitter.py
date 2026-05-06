@@ -153,6 +153,7 @@ async def _post(client, target_id: int, tweet: dict, username: str, display_name
 
 # ─── POLLING ENGINE ───────────────────────────────────────────────────────────
 _tasks: dict[str, asyncio.Task] = {}
+_pending_accounts: dict[str, tuple] = {}  # username_lower -> (password, email)
 
 async def _poll(client, key: str):
     while True:
@@ -239,19 +240,36 @@ async def twaccount_cmd(event):
     a = await _api()
 
     if subcmd == "add":
-        if len(args) < 5:
-            return await event.respond("❌ Usage: <code>.twaccount add user pass email email_pass</code>", parse_mode="html")
-        user, pw, email, epw = args[1], args[2], args[3], args[4]
+        if len(args) < 4:
+            return await event.respond(
+                "❌ Usage: <code>.twaccount add &lt;username&gt; &lt;password&gt; &lt;email&gt; [email_password]</code>\n\n"
+                "<i>email_password is optional — only needed if Twitter sends a verification code to your email during login.</i>",
+                parse_mode="html",
+            )
+        user, pw, email = args[1], args[2], args[3]
+        epw = args[4] if len(args) >= 5 else ""
         st = await event.respond(f"⏳ <b>Logging in @{user}...</b>", parse_mode="html")
         try:
             await a.pool.add_account(user, pw, email, epw)
             await a.pool.login_all()
             accs = await a.pool.get_all()
-            active = sum(1 for ac in accs if ac.active)
-            if active:
-                await st.edit(f"✅ <b>@{user} logged in!</b>\nActive accounts: {active}\n\nYou can now use <code>.twmonitor add</code>.", parse_mode="html")
+            acc = next((ac for ac in accs if ac.username.lower() == user.lower()), None)
+            if acc and acc.active:
+                _pending_accounts.pop(user.lower(), None)
+                total_active = sum(1 for ac in accs if ac.active)
+                await st.edit(
+                    f"✅ <b>@{user} logged in!</b>\nActive accounts: {total_active}\n\nYou can now use <code>.twmonitor add</code>.",
+                    parse_mode="html",
+                )
             else:
-                await st.edit("⚠️ <b>Login may have failed.</b> Check your credentials.", parse_mode="html")
+                # Login incomplete — Twitter likely needs a verification code
+                _pending_accounts[user.lower()] = (pw, email)
+                await st.edit(
+                    f"⚠️ <b>Twitter is asking for a verification code.</b>\n\n"
+                    f"Check your email <code>{email}</code> for a code from Twitter,\n"
+                    f"then send:\n<code>.twverify {user} YOUR_CODE</code>",
+                    parse_mode="html",
+                )
         except Exception as e:
             await st.edit(f"❌ <b>Login error:</b> <code>{e}</code>", parse_mode="html")
 
@@ -274,6 +292,63 @@ async def twaccount_cmd(event):
             await event.respond(f"❌ <code>{e}</code>", parse_mode="html")
     else:
         await event.respond("❌ Unknown subcommand. Use <code>add</code>, <code>list</code>, or <code>del</code>.", parse_mode="html")
+
+
+# ─── .twverify ────────────────────────────────────────────────────────────────
+@CipherElite.on(events.NewMessage(pattern=r"^\.twverify(?:\s|$)(.*)"))
+@rishabh()
+async def twverify_cmd(event):
+    await event.delete()
+    if not TWSCRAPE_OK:
+        return await event.respond(_no_twscrape_msg(), parse_mode="html")
+
+    args = (event.pattern_match.group(1) or "").strip().split()
+    if len(args) < 2:
+        return await event.respond(
+            "❌ <b>Usage:</b> <code>.twverify &lt;username&gt; &lt;code&gt;</code>\n"
+            "<i>Run this after Twitter asks for a verification code during .twaccount add</i>",
+            parse_mode="html",
+        )
+
+    username, code = args[0], args[1]
+    key = username.lower()
+
+    if key not in _pending_accounts:
+        return await event.respond(
+            f"⚠️ No pending login for <code>{username}</code>.\n"
+            "Use <code>.twaccount add</code> first.",
+            parse_mode="html",
+        )
+
+    pw, email = _pending_accounts[key]
+    st = await event.respond(f"⏳ <b>Submitting verification code for @{username}...</b>", parse_mode="html")
+
+    try:
+        a = await _api()
+        # Remove the failed account and re-add supplying the code as email_password
+        # twscrape will use it to complete email verification
+        await a.pool.delete_accounts([username])
+        await a.pool.add_account(username, pw, email, code)
+        await a.pool.login_all()
+
+        accs = await a.pool.get_all()
+        acc = next((ac for ac in accs if ac.username.lower() == key), None)
+
+        if acc and acc.active:
+            del _pending_accounts[key]
+            await st.edit(
+                f"✅ <b>@{username} verified and logged in!</b>\n\n"
+                "You can now use <code>.twmonitor add</code>.",
+                parse_mode="html",
+            )
+        else:
+            await st.edit(
+                "❌ <b>Verification failed.</b>\n"
+                "The code may be wrong or expired. Try <code>.twaccount add</code> again.",
+                parse_mode="html",
+            )
+    except Exception as e:
+        await st.edit(f"❌ <b>Error:</b> <code>{e}</code>", parse_mode="html")
 
 # ─── .twmonitor ───────────────────────────────────────────────────────────────
 @CipherElite.on(events.NewMessage(pattern=r"^\.twmonitor(?:\s|$)(.*)"))
