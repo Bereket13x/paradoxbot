@@ -1,4 +1,4 @@
-﻿# ==============================================================================
+# ==============================================================================
 #  🎭 PARADOX - Advanced Plugin Manager (Fixed)
 #  Features: Smart Dependency Mapping & Auto-Install
 # ==============================================================================
@@ -264,14 +264,32 @@ async def register_commands():
             help_key = get_plugin_key(source)
             
             os.remove(file_path)
-            if module_name in sys.modules: del sys.modules[module_name]
+            if module_name in sys.modules: 
+                del sys.modules[module_name]
+
+            # ── REMOVE ACTIVE EVENT HANDLERS FROM MEMORY ──
+            removed_handlers = 0
+            for callback, event_builder in event.client.list_event_handlers():
+                actual_func = callback
+                # Unwrap decorators to find the original module
+                while hasattr(actual_func, '__wrapped__'):
+                    actual_func = actual_func.__wrapped__
+                    
+                if getattr(actual_func, '__module__', '') == module_name:
+                    event.client.remove_event_handler(callback, event_builder)
+                    removed_handlers += 1
 
             help_msg = ""
             if help_key and remove_handler:
                 remove_handler(help_key)
                 help_msg = f"\n✅ **Removed from Help:** `{help_key}`"
 
-            await event.reply(f"🗑 **Deleted:** `{file_name}`{help_msg}")
+            reply_msg = f"🗑 **Deleted:** `{file_name}`"
+            if removed_handlers > 0:
+                reply_msg += f"\n🧹 **Unloaded:** `{removed_handlers}` active commands"
+            reply_msg += help_msg
+            
+            await event.reply(reply_msg)
 
         except Exception as e:
             await event.reply(f"❌ **Error:** {str(e)}")
