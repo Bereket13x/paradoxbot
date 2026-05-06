@@ -13,9 +13,10 @@
 #    any Telegram chat.
 #
 #  SETUP:
-#    Add to your .env file:
-#      TWITTER_BEARER_TOKEN=your_bearer_token_here
+#    Use the in-bot command once:
+#      .twsetup <your_bearer_token>
 #
+#    Token is saved to DB/ and persists across bot updates.
 #    Get a free Bearer Token at: https://developer.twitter.com/
 # =============================================================================
 
@@ -39,12 +40,18 @@ from plugins.bot import add_handler
 # CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
 
-TWITTER_BEARER_TOKEN = os.getenv("TWITTER_BEARER_TOKEN", "")
-
 POLL_INTERVAL = 120  # seconds between checks per account
+
+# Token is loaded dynamically from DB (set via .twsetup) or env var fallback.
+# Always call _get_token() instead of using a global directly.
+def _get_token() -> str:
+    db = _load_db()
+    return db.get("bearer_token") or os.getenv("TWITTER_BEARER_TOKEN", "")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DATABASE  (DB/twitter_monitor.json)
+# Stores bearer token + all monitor configs in one persistent file.
+# This file lives in DB/ which is NOT overwritten on bot updates.
 # ─────────────────────────────────────────────────────────────────────────────
 
 DB_DIR = Path("DB")
@@ -53,11 +60,13 @@ DB_PATH = DB_DIR / "twitter_monitor.json"
 
 # Schema:
 # {
+#   "bearer_token": "AAAA...",            ← saved by .twsetup (persists updates)
 #   "monitors": {
 #     "<twitter_username_lower>": {
 #       "username": "realUsername",
+#       "display_name": "Real Name",
 #       "user_id": "1234567890",
-#       "targets": ["-100xxx", "-100yyy"],   # Telegram chat IDs as strings
+#       "targets": ["-100xxx", "-100yyy"],
 #       "last_tweet_id": "1234567890123456789"
 #     }
 #   }
@@ -85,7 +94,7 @@ def _save_db(db: dict):
 TWITTER_API_BASE = "https://api.twitter.com/2"
 
 def _headers() -> dict:
-    return {"Authorization": f"Bearer {TWITTER_BEARER_TOKEN}"}
+    return {"Authorization": f"Bearer {_get_token()}"}
 
 
 async def _api_get(session: aiohttp.ClientSession, path: str, params: dict) -> dict | None:
@@ -384,6 +393,7 @@ async def _resume_all_monitors(client):
 
 def init(client_instance):
     commands = [
+        ".twsetup <bearer_token>                          — Save your Twitter Bearer Token (once only)",
         ".twmonitor add <@twitter_user> <telegram_chat>  — Start auto-posting tweets",
         ".twmonitor del <@twitter_user> [telegram_chat]  — Stop monitoring (all or specific chat)",
         ".twmonitor list                                  — Show all active monitors",
@@ -393,12 +403,74 @@ def init(client_instance):
     description = (
         "🐦 <b>Twitter Monitor</b> — Auto-post tweets to Telegram\n"
         "Supports photos, videos, multi-media albums & text.\n"
-        "Requires <code>TWITTER_BEARER_TOKEN</code> in <code>.env</code>"
+        "Run <code>.twsetup &lt;token&gt;</code> once to configure."
     )
     add_handler("twitter", commands, description)
 
     # Schedule resume after event loop starts
     asyncio.ensure_future(_resume_all_monitors(client_instance))
+
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# COMMAND: .twsetup  — save bearer token to DB (persists across bot updates)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@CipherElite.on(events.NewMessage(pattern=r"^\.twsetup(?:\s|$)(.*)"))
+@rishabh()
+async def twsetup_command(event):
+    await event.delete()
+
+    token = (event.pattern_match.group(1) or "").strip()
+
+    if not token:
+        db = _load_db()
+        current = db.get("bearer_token", "")
+        masked = f"{current[:10]}...{current[-5:]}" if len(current) > 15 else ("✅ Set" if current else "❌ Not set")
+        return await event.respond(
+            "🔑 <b>Twitter Bearer Token Setup</b>\n\n"
+            f"Current token: <code>{masked}</code>\n\n"
+            "To set/update your token:\n"
+            "<code>.twsetup YOUR_BEARER_TOKEN_HERE</code>\n\n"
+            "Get a free token at <a href=\"https://developer.twitter.com/\">developer.twitter.com</a>\n"
+            "<i>Your token is saved to the DB folder and persists across bot updates.</i>",
+            parse_mode="html",
+        )
+
+    # Validate by making a test API call
+    status = await event.respond("🔍 <b>Validating token...</b>", parse_mode="html")
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            "https://api.twitter.com/2/users/me",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as resp:
+            valid = resp.status == 200
+            resp_data = await resp.json() if resp.status in (200, 401, 403) else {}
+
+    if not valid:
+        err = resp_data.get("detail") or resp_data.get("title") or "Unknown error"
+        return await status.edit(
+            f"❌ <b>Token validation failed:</b> <code>{err}</code>\n\n"
+            "Make sure you copied the full Bearer Token correctly.",
+            parse_mode="html",
+        )
+
+    # Save to DB
+    db = _load_db()
+    db["bearer_token"] = token
+    if "monitors" not in db:
+        db["monitors"] = {}
+    _save_db(db)
+
+    await status.edit(
+        "✅ <b>Twitter Bearer Token saved!</b>\n\n"
+        "Your token is stored in <code>DB/twitter_monitor.json</code> and will persist across bot updates.\n\n"
+        "You can now use:\n"
+        "<code>.twmonitor add @username -100xxxxxxxxx</code>",
+        parse_mode="html",
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -410,12 +482,12 @@ def init(client_instance):
 async def twmonitor_command(event):
     await event.delete()
 
-    if not TWITTER_BEARER_TOKEN:
+    if not _get_token():
         return await event.respond(
-            "❌ <b>TWITTER_BEARER_TOKEN not set!</b>\n\n"
-            "Add it to your <code>.env</code> file:\n"
-            "<code>TWITTER_BEARER_TOKEN=your_bearer_token</code>\n\n"
-            "Get one free at <a href=\"https://developer.twitter.com/\">developer.twitter.com</a>",
+            "❌ <b>Twitter Bearer Token not configured!</b>\n\n"
+            "Run this command first:\n"
+            "<code>.twsetup YOUR_BEARER_TOKEN_HERE</code>\n\n"
+            "Get a free token at <a href=\"https://developer.twitter.com/\">developer.twitter.com</a>",
             parse_mode="html",
         )
 
