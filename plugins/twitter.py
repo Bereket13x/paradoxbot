@@ -442,14 +442,14 @@ async def twsetup_command(event):
 
     async with aiohttp.ClientSession() as session:
         async with session.get(
-            "https://api.twitter.com/2/tweets/search/recent",
+            "https://api.twitter.com/2/users/by/username/twitter",
             headers={"Authorization": f"Bearer {token}"},
-            params={"query": "from:Twitter", "max_results": 10},
+            params={"user.fields": "name"},
             timeout=aiohttp.ClientTimeout(total=10),
         ) as resp:
-            resp_data = await resp.json() if resp.status in (200, 400, 401, 403) else {}
-            # 200 or 400 (bad query params but valid auth) both mean the token works
-            valid = resp.status in (200, 400)
+            resp_data = await resp.json() if resp.status in (200, 401, 403) else {}
+            # This endpoint works on free tier with Bearer token App-Only auth
+            valid = resp.status == 200
 
     if not valid:
         err = resp_data.get("detail") or resp_data.get("title") or "Unknown error"
@@ -789,3 +789,4 @@ def _help_text() -> str:
         "Get a free token at <a href=\"https://developer.twitter.com/\">developer.twitter.com</a>\n\n"
         "<i>Powered by PARADOX</i>"
     )
+
