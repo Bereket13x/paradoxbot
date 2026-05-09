@@ -39,7 +39,7 @@ class PersonalAssistant:
         self.ai_config = ai_config  # Reference to centralized config
         self.data = {
             "config": {
-                "alive_name": os.environ.get("ALIVE_NAME", "PARADOX"),
+                "alive_name": os.environ.get("ALIVE_NAME", "Owner"),
                 "assistant_name": os.environ.get("ASSISTANT_NAME", "ParadoxAI"),
                 "pmpermit_pic": os.environ.get("PMPERMIT_PIC", DEFAULT_PMPERMIT_PIC),
                 "use_pic": True,
@@ -75,15 +75,15 @@ class PersonalAssistant:
         try:
             genai.configure(api_key=api_key)
             system_instruction = (
-                f"You are {self.data['config']['assistant_name']}, a professional AI assistant managing "
+                f"You are {self.data['config']['assistant_name']}, a Gen Z AI assistant managing "
                 f"the private inbox of {self.data['config']['alive_name']}. "
                 "The owner is currently unavailable. Your role is to assist incoming contacts "
-                "professionally and ensure their queries are noted for the owner's review. "
-                "Greet users warmly, assist with their queries where possible, and let them know "
-                "their message will be forwarded to the owner. "
-                "If asked when the owner will be available, state that the exact time cannot be "
-                "confirmed but their message will be forwarded promptly. "
-                "Maintain a professional, courteous tone at all times. Keep responses under 80 words."
+                "and ensure their queries are noted for the owner's review. "
+                "Greet users with Gen Z slang and lots of emojis ✨🔥, assist with their queries "
+                "where possible, and let them know their message will be forwarded to the owner. "
+                "If asked when the owner will be available, state that you don't know but "
+                "their message will be forwarded ASAP. "
+                "Maintain a trendy, casual, and Gen Z tone at all times. Keep responses under 80 words."
             )
             self.model = genai.GenerativeModel(
                 "gemini-2.5-flash",
@@ -152,11 +152,10 @@ class PersonalAssistant:
         cfg = self.data["config"]
         texts = {
             "introduction": [
-                f"Good day, **{{first_name}}**. The owner, **{cfg['alive_name']}**, is currently unavailable.\n\n"
-                f"You are now connected to **{cfg['assistant_name']}**, a dedicated AI assistant "
-                f"managing this inbox. Please feel free to share your query and you will be "
-                f"assisted promptly.\n\n"
-                f"Your message will also be forwarded to the owner for their attention."
+                f"Hey **{{first_name}}**! 👋 The owner, **{cfg['alive_name']}**, isn't around right now.\n\n"
+                f"I'm **{cfg['assistant_name']}** ✨, your friendly Gen Z AI assistant managing this inbox! "
+                f"Drop your message below and I'll help you out, plus I'll make sure the owner sees it later. 💯\n\n"
+                f"*(Btw, if you don't want me to reply and just want to leave a message for the owner, just start your message with a `.`)*"
             ],
             "approved": [
                 "✅ You have been approved. You may now communicate directly. Welcome."
@@ -220,26 +219,33 @@ class PersonalAssistant:
 
             # If AI is ready, immediately respond to their first message too
             if self.model and msg_text:
-                if uid not in self.ai_sessions:
-                    self.ai_sessions[uid] = self.model.start_chat(history=[])
-                try:
-                    async with event.client.action(event.chat_id, "typing"):
+                if msg_text.startswith("."):
+                    pass  # They used the prefix, skip AI response
+                else:
+                    if uid not in self.ai_sessions:
+                        self.ai_sessions[uid] = self.model.start_chat(history=[])
+                    try:
+                        temp_msg = await event.reply("✨ *Let me cook...* 🍳")
                         response = await self.ai_sessions[uid].send_message_async(msg_text)
-                    await event.reply(response.text)
-                except Exception as e:
-                    logging.error(f"AI Error (first contact): {e}")
+                        await temp_msg.edit(response.text)
+                    except Exception as e:
+                        logging.error(f"AI Error (first contact): {e}")
             return
 
         # ── 2) Returning unapproved user — AI handles everything ──────────────
         if self.model:
+            if msg_text.startswith("."):
+                await self.send_notification(event, self.data["users"][uid], msg_text or "[No text]")
+                return
+
             if uid not in self.ai_sessions:
                 self.ai_sessions[uid] = self.model.start_chat(history=[])
             try:
-                async with event.client.action(event.chat_id, "typing"):
-                    response = await self.ai_sessions[uid].send_message_async(
-                        msg_text or "(no text)"
-                    )
-                await event.reply(response.text)
+                temp_msg = await event.reply("✨ *Let me cook...* 🍳")
+                response = await self.ai_sessions[uid].send_message_async(
+                    msg_text or "(no text)"
+                )
+                await temp_msg.edit(response.text)
                 await self.send_notification(event, self.data["users"][uid], msg_text or "[No text]")
             except Exception as e:
                 logging.error(f"AI Error: {e}")
