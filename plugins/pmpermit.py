@@ -192,6 +192,10 @@ class PersonalAssistant:
         if not self.data["config"].get("pmpermit_enabled", True):
             return
 
+        # Dynamically load AI if key was just set
+        if not self.model:
+            self._init_ai()
+
         sender = await event.get_sender()
         uid = str(sender.id)
 
@@ -230,6 +234,7 @@ class PersonalAssistant:
                         await temp_msg.edit(response.text)
                     except Exception as e:
                         logging.error(f"AI Error (first contact): {e}")
+                        await temp_msg.edit(f"❌ **AI Error:** {str(e)}")
             return
 
         # ── 2) Returning unapproved user — AI handles everything ──────────────
@@ -249,10 +254,7 @@ class PersonalAssistant:
                 await self.send_notification(event, self.data["users"][uid], msg_text or "[No text]")
             except Exception as e:
                 logging.error(f"AI Error: {e}")
-                await event.reply(
-                    "⏳ Apologies, the assistant is momentarily unavailable. "
-                    "Your message has been forwarded to the owner."
-                )
+                await temp_msg.edit(f"❌ **AI Error:** {str(e)}\n\n⏳ *Apologies, the assistant is momentarily unavailable.*")
                 await self.send_notification(event, self.data["users"][uid], msg_text or "[No text]")
             return
 
