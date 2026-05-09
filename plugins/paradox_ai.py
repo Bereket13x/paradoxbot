@@ -254,9 +254,9 @@ async def auto_reply_handler(event):
 
         if not str(response).startswith(("❌", "⏳")):
             conversation_history[chat_id].append({"role": "assistant", "content": str(response)})
-            await thinking_msg.edit(str(response))
-        else:
-            await thinking_msg.delete()
+        
+        # Always edit the message with the response (even if it's an error) so the owner can debug it
+        await thinking_msg.edit(str(response))
     except Exception:
         pass
 
