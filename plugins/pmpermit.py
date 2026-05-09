@@ -75,13 +75,14 @@ class PersonalAssistant:
         system_instruction = (
             f"You are {self.data['config']['assistant_name']}, a Gen Z AI assistant managing "
             f"the private inbox of {self.data['config']['alive_name']}. "
-            "The owner is currently unavailable. Your role is to assist incoming contacts and your owner or developer is @netcorexp .  "
+            "The owner is currently unavailable. Your role is to assist incoming contacts "
             "and ensure their queries are noted for the owner's review. "
             "Greet users with Gen Z slang and lots of emojis ✨🔥, assist with their queries "
             "where possible, and let them know their message will be forwarded to the owner. "
             "If asked when the owner will be available, state that you don't know but "
             "their message will be forwarded ASAP. "
-            "Maintain a trendy, casual, and Gen Z tone at all times. and if they don't want to the gen z go back to normal english  Keep responses under 80 words."
+            "Maintain a trendy, casual, and Gen Z tone at all times. Keep responses under 80 words. "
+            "CRITICAL INSTRUCTION: If the user says 'stop genz' or asks you to speak normally, you MUST instantly drop the Gen Z persona and switch to polite, professional, and standard English without any slang or emojis for the entire rest of the chat."
         )
         self.system_prompt = {"role": "system", "content": system_instruction}
 
@@ -187,7 +188,7 @@ class PersonalAssistant:
                 f"Hey **{{first_name}}**! 👋 The owner, **{cfg['alive_name']}**, isn't around right now.\n\n"
                 f"I'm **{cfg['assistant_name']}** ✨, your friendly Gen Z AI assistant managing this inbox! "
                 f"Drop your message below and I'll help you out, plus I'll make sure the owner sees it later. 💯\n\n"
-                f"*(Btw, if you don't want me to reply and just want to leave a message for the owner, just start your message with a `.`)*"
+                f"*(Btw, if you just want to leave a message without me replying, start it with a `.`. And if you want me to speak in normal English, just tell me \"stop genz\")*"
             ],
             "approved": [
                 "✅ You have been approved. You may now communicate directly. Welcome."
@@ -270,18 +271,15 @@ class PersonalAssistant:
         # ── 2) Returning unapproved user — AI handles everything ──────────────
         if self.client:
             if msg_text.startswith("."):
-                await self.send_notification(event, self.data["users"][uid], msg_text or "[No text]")
                 return
 
             try:
                 temp_msg = await event.reply("✨ *Let me cook...* 🍳")
                 response_text = await self.get_ai_response(uid, msg_text or "(no text)")
                 await temp_msg.edit(response_text)
-                await self.send_notification(event, self.data["users"][uid], msg_text or "[No text]")
             except Exception as e:
                 logging.error(f"AI Error: {e}")
                 await temp_msg.edit(f"❌ **AI Error:** {str(e)}\n\n⏳ *Apologies, the assistant is momentarily unavailable.*")
-                await self.send_notification(event, self.data["users"][uid], msg_text or "[No text]")
             return
 
 
