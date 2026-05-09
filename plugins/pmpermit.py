@@ -16,7 +16,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-import google.generativeai as genai
+from openai import AsyncOpenAI
 from telethon import events
 from utils.utils import CipherElite
 from utils.decorators import rishabh
@@ -51,7 +51,8 @@ class PersonalAssistant:
             "warnings": {},  # Fix: was missing, caused KeyError on first new PM
         }
         self.ai_sessions = {}
-        self.model = None
+        self.client = None
+        self.model_name = None
 
         # 1. Load and safely validate data from JSON
         self._load()
@@ -66,34 +67,65 @@ class PersonalAssistant:
             self._save()
 
     def _init_ai(self):
-        """Initializes the Gemini model using centralized config."""
-        api_key = self.ai_config.get_api_key()  # Get from centralized config
-        if not api_key:
-            self.model = None
-            return False
+        """Initializes the AI model using centralized config."""
+        provider = self.ai_config.get_provider()
+        nvidia_key = self.ai_config.get_nvidia_key()
+        gemini_key = self.ai_config.get_gemini_key()
+
+        system_instruction = (
+            f"You are {self.data['config']['assistant_name']}, a Gen Z AI assistant managing "
+            f"the private inbox of {self.data['config']['alive_name']}. "
+            "The owner is currently unavailable. Your role is to assist incoming contacts "
+            "and ensure their queries are noted for the owner's review. "
+            "Greet users with Gen Z slang and lots of emojis ✨🔥, assist with their queries "
+            "where possible, and let them know their message will be forwarded to the owner. "
+            "If asked when the owner will be available, state that you don't know but "
+            "their message will be forwarded ASAP. "
+            "Maintain a trendy, casual, and Gen Z tone at all times. Keep responses under 80 words."
+        )
+        self.system_prompt = {"role": "system", "content": system_instruction}
 
         try:
-            genai.configure(api_key=api_key)
-            system_instruction = (
-                f"You are {self.data['config']['assistant_name']}, a Gen Z AI assistant managing "
-                f"the private inbox of {self.data['config']['alive_name']}. "
-                "The owner is currently unavailable. Your role is to assist incoming contacts "
-                "and ensure their queries are noted for the owner's review. "
-                "Greet users with Gen Z slang and lots of emojis ✨🔥, assist with their queries "
-                "where possible, and let them know their message will be forwarded to the owner. "
-                "If asked when the owner will be available, state that you don't know but "
-                "their message will be forwarded ASAP. "
-                "Maintain a trendy, casual, and Gen Z tone at all times. Keep responses under 80 words."
-            )
-            self.model = genai.GenerativeModel(
-                "gemini-2.5-flash",
-                system_instruction=system_instruction,
-            )
-            return True
+            if provider == "gemini" and gemini_key:
+                self.client = AsyncOpenAI(base_url="https://generativelanguage.googleapis.com/v1beta/openai/", api_key=gemini_key)
+                self.model_name = "gemini-2.0-flash"
+                return True
+            elif nvidia_key:
+                self.client = AsyncOpenAI(base_url="https://integrate.api.nvidia.com/v1", api_key=nvidia_key)
+                self.model_name = "mistralai/mistral-nemotron"
+                return True
+            
+            self.client = None
+            return False
         except Exception as e:
             logging.error(f"Failed to initialize AI Gatekeeper: {e}")
-            self.model = None
+            self.client = None
             return False
+
+    async def get_ai_response(self, uid, msg_text):
+        if uid not in self.ai_sessions:
+            self.ai_sessions[uid] = [self.system_prompt]
+            
+        self.ai_sessions[uid].append({"role": "user", "content": msg_text})
+        
+        if len(self.ai_sessions[uid]) > 6:
+            self.ai_sessions[uid] = [self.system_prompt] + self.ai_sessions[uid][-5:]
+            
+        stream = await self.client.chat.completions.create(
+            model=self.model_name,
+            messages=self.ai_sessions[uid],
+            max_tokens=800,
+            stream=True
+        )
+        response_text = ""
+        async for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content is not None:
+                response_text += chunk.choices[0].delta.content
+                
+        import re
+        response_text = re.sub(r'<think>.*?</think>', '', response_text, flags=re.DOTALL).strip()
+        self.ai_sessions[uid].append({"role": "assistant", "content": response_text})
+        return response_text
 
     def _load(self):
         """Loads DB and strictly enforces data types to prevent crashes."""
@@ -193,7 +225,7 @@ class PersonalAssistant:
             return
 
         # Dynamically load AI if key was just set
-        if not self.model:
+        if not self.client:
             self._init_ai()
 
         sender = await event.get_sender()
@@ -222,35 +254,29 @@ class PersonalAssistant:
             await self.send_notification(event, self.data["users"][uid], msg_text or "[No text]")
 
             # If AI is ready, immediately respond to their first message too
-            if self.model and msg_text:
+            if self.client and msg_text:
                 if msg_text.startswith("."):
                     pass  # They used the prefix, skip AI response
                 else:
-                    if uid not in self.ai_sessions:
-                        self.ai_sessions[uid] = self.model.start_chat(history=[])
                     try:
                         temp_msg = await event.reply("✨ *Let me cook...* 🍳")
-                        response = await self.ai_sessions[uid].send_message_async(msg_text)
-                        await temp_msg.edit(response.text)
+                        response_text = await self.get_ai_response(uid, msg_text)
+                        await temp_msg.edit(response_text)
                     except Exception as e:
                         logging.error(f"AI Error (first contact): {e}")
                         await temp_msg.edit(f"❌ **AI Error:** {str(e)}")
             return
 
         # ── 2) Returning unapproved user — AI handles everything ──────────────
-        if self.model:
+        if self.client:
             if msg_text.startswith("."):
                 await self.send_notification(event, self.data["users"][uid], msg_text or "[No text]")
                 return
 
-            if uid not in self.ai_sessions:
-                self.ai_sessions[uid] = self.model.start_chat(history=[])
             try:
                 temp_msg = await event.reply("✨ *Let me cook...* 🍳")
-                response = await self.ai_sessions[uid].send_message_async(
-                    msg_text or "(no text)"
-                )
-                await temp_msg.edit(response.text)
+                response_text = await self.get_ai_response(uid, msg_text or "(no text)")
+                await temp_msg.edit(response_text)
                 await self.send_notification(event, self.data["users"][uid], msg_text or "[No text]")
             except Exception as e:
                 logging.error(f"AI Error: {e}")
@@ -332,12 +358,13 @@ def init(client):
     @rishabh()
     async def _pmstatus(event):
         cfg = assistant.data["config"]
-        key = assistant.ai_config.get_api_key()
+        provider = assistant.ai_config.get_provider()
         await event.reply(
             f"🛠 **PM Permit Status**\n\n"
             f"✅ **Enabled:** `{cfg.get('pmpermit_enabled', True)}`\n"
-            f"🤖 **AI Model Loaded:** `{'Yes' if assistant.model else 'No'}`\n"
-            f"🔑 **Gemini Key Found:** `{'Yes' if key else 'No'}`\n"
+            f"⚡ **Active Provider:** `{provider.upper()}`\n"
+            f"🤖 **AI Model Loaded:** `{'Yes' if assistant.client else 'No'}`\n"
+            f"🧠 **Model:** `{assistant.model_name if assistant.model_name else 'None'}`\n"
             f"👥 **Approved Users Count:** `{len(assistant.data.get('approved_users', []))}`"
         )
 
