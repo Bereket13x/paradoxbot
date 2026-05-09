@@ -274,6 +274,7 @@ def init(client):
         ".setpermitpic        — Set the permit picture",
         ".togglepermitpic     — Enable/disable the picture",
         ".pmpermit on|off     — Enable/disable PM permit globally",
+        ".pmstatus            — Check PM Permit AI status & debugging",
     ]
     add_handler("pmpermit", commands, "Personal Assistant PM Manager")
 
@@ -326,6 +327,19 @@ def init(client):
             name = info.get("name", "Unknown")
             text += f"• {name} (`{uid}`)\n"
         await event.reply(text)
+
+    @CipherElite.on(events.NewMessage(outgoing=True, pattern=r"\.pmstatus$"))
+    @rishabh()
+    async def _pmstatus(event):
+        cfg = assistant.data["config"]
+        key = assistant.ai_config.get_api_key()
+        await event.reply(
+            f"🛠 **PM Permit Status**\n\n"
+            f"✅ **Enabled:** `{cfg.get('pmpermit_enabled', True)}`\n"
+            f"🤖 **AI Model Loaded:** `{'Yes' if assistant.model else 'No'}`\n"
+            f"🔑 **Gemini Key Found:** `{'Yes' if key else 'No'}`\n"
+            f"👥 **Approved Users Count:** `{len(assistant.data.get('approved_users', []))}`"
+        )
 
     @CipherElite.on(events.NewMessage(outgoing=True, pattern=r"\.setpermitpic(?:\s+.*)?$"))
     @rishabh()
