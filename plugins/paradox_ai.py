@@ -182,7 +182,20 @@ async def auto_reply_handler(event):
         return
 
     # Outgoing message → auto-approve user so AI stops replying
+    # We must ignore automated bot messages so we don't accidentally approve someone when the AI replies
     if getattr(event, 'out', False):
+        text = event.text or ""
+        # Ignore pmpermit's and paradox's own automated messages
+        if text.startswith((
+            "✨ *Let me cook",
+            "Hey **",
+            "❌ Your access",
+            "✅ You have been",
+            "🤖 **PARADOX",
+            "**[░░░░░"
+        )):
+            return
+
         db_path = "DB/assistant_db.json"
         if os.path.exists(db_path):
             try:
