@@ -10,7 +10,6 @@ import re
 import os
 import json
 from datetime import datetime
-from typing import Optional
 
 from openai import AsyncOpenAI, OpenAIError, AuthenticationError, RateLimitError
 from telethon import events
@@ -18,46 +17,53 @@ from utils.utils import CipherElite
 from utils.decorators import rishabh
 from plugins.bot import add_handler
 
-NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
+# ── Provider constants ─────────────────────────────────────────────────────
+NVIDIA_BASE_URL    = "https://integrate.api.nvidia.com/v1"
 NVIDIA_DEFAULT_MODEL = "mistralai/mistral-nemotron"
-GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+
+GEMINI_BASE_URL    = "https://generativelanguage.googleapis.com/v1beta/openai/"
 GEMINI_DEFAULT_MODEL = "gemini-2.0-flash"
 
-conversation_history = {}
+# ── Runtime state ──────────────────────────────────────────────────────────
+conversation_history: dict = {}
 AUTO_AI_STATE = "OFF"   # "OFF" | "ALL"
 
-def get_system_prompt():
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Helpers
+# ══════════════════════════════════════════════════════════════════════════
+
+def get_system_prompt() -> dict:
     current_time = datetime.now().strftime("%A, %B %d, %Y - %I:%M %p")
     return {
         "role": "system",
         "content": (
-            f"You are the user's personal AI assistant. You were developed by @netcorexp. "
+            f"You are the user's personal AI assistant. You were developed by Paradox Ethiopian Developer. "
             f"Current Date: {current_time}. Provide natural and highly accurate answers to the people messaging you. "
             "Do not unnecessarily introduce yourself or mention technical details about being a userbot in every message. Just directly and politely answer. "
             "By default, keep your answers short and concise but ensure they provide a good, clear explanation. "
             "If the user explicitly asks you to be brief, answer as briefly as possible. "
             "Return only the final result without any thinking process, internal deliberations, or <think> blocks. "
             "Avoid technical model details or markdown unless absolutely necessary. "
-            "IMPORTANT LANGUAGE RULE: You must communicate ONLY in English. "
-            "If you receive a prompt in ANY other language, refuse and reply EXACTLY: "
-            "'I'm sorry, I can only understand and respond in English. Please message me in English for assistance.'"
+            "IMPORTANT LANGUAGE RULE: You must communicate ONLY in English, Amharic, or Indian languages (like Hindi). "
+            "If communicating in Amharic, ensure your vocabulary and grammar are strictly native, highly fluent, and conversational. "
+            "If you receive a prompt in ANY other language not listed above, refuse and reply EXACTLY: "
+            "'Can you tell me what you want in English or something'."
         )
     }
 
-def _build_client(provider: str, nvidia_key: Optional[str], gemini_key: Optional[str]):
+
+def _build_client(provider: str, nvidia_key: str | None, gemini_key: str | None):
+    """Return (AsyncOpenAI client, model_name) for the active provider."""
     if provider == "gemini" and gemini_key:
         return AsyncOpenAI(base_url=GEMINI_BASE_URL, api_key=gemini_key), GEMINI_DEFAULT_MODEL
     if nvidia_key:
         return AsyncOpenAI(base_url=NVIDIA_BASE_URL, api_key=nvidia_key), NVIDIA_DEFAULT_MODEL
     return None, None
 
-def is_english(text: str) -> bool:
-    if not text:
-        return True
-    ascii_ratio = sum(1 for c in text if c.isascii()) / max(1, len(text))
-    return ascii_ratio >= 0.9
 
-async def make_ai_request(messages, temperature=0.6, top_p=0.7, max_tokens=2048):
+async def make_ai_request(messages: list, temperature=0.6, top_p=0.7, max_tokens=2048) -> str:
+    """Stream a response from the currently active provider."""
     try:
         from plugins.ai_setup import ai_config
         provider   = ai_config.get_provider()
@@ -80,6 +86,7 @@ async def make_ai_request(messages, temperature=0.6, top_p=0.7, max_tokens=2048)
             if chunk.choices[0].delta.content is not None:
                 response += chunk.choices[0].delta.content
 
+        # Strip internal reasoning blocks
         return re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
 
     except AuthenticationError:
@@ -91,30 +98,15 @@ async def make_ai_request(messages, temperature=0.6, top_p=0.7, max_tokens=2048)
     except asyncio.TimeoutError:
         return "⏰ **Timeout Error:** Request took too long."
     except Exception as e:
-        print("Exception in make_ai_request:", e)
         return f"❌ **Unexpected Error:** {str(e)}"
 
-async def animate_thinking(message, api_task):
-    frames = [
-        "**[░░░░░░░░░░]  5%** ⏳ `Initializing neuro-link...`",
-        "**[█░░░░░░░░░] 15%** 🧠 `Analyzing query patterns...`",
-        "**[███░░░░░░░] 30%** 🔍 `Searching databanks...`",
-        "**[█████░░░░░] 50%** ⚙️ `Synthesizing information...`",
-        "**[███████░░░] 75%** ⚡ `Optimizing tokens...`",
-        "**[█████████░] 90%** 🚀 `Finalizing output...`",
-        "**[██████████] 100%** ✅ `Response ready!`",
-    ]
-    idx = 0
-    try:
-        while not api_task.done():
-            try:
-                await message.edit(frames[idx])
-                idx = (idx + 1) if idx < len(frames) - 1 else 0
-            except Exception:
-                pass
-            await asyncio.sleep(1.5)
-    except asyncio.CancelledError:
-        pass
+
+
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  init
+# ══════════════════════════════════════════════════════════════════════════
 
 def init(client):
     commands = [
@@ -131,6 +123,11 @@ def init(client):
     add_handler("paradox_ai", commands, description)
     print("🤖 PARADOX AI Plugin initialized successfully")
     return True
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  .pautoai — Toggle auto-responder
+# ══════════════════════════════════════════════════════════════════════════
 
 @CipherElite.on(events.NewMessage(pattern=r"(?i)\.pautoai(?:\s+(on|off|status))?"))
 @rishabh()
@@ -156,7 +153,12 @@ async def autoai_handler(event):
         AUTO_AI_STATE = "OFF"
         await event.reply("❌ **Auto AI disabled.**")
     elif action == "status":
-        await event.reply(f"🤖 **Auto AI is currently `{AUTO_AI_STATE}`.")
+        await event.reply(f"🤖 **Auto AI is currently `{AUTO_AI_STATE}`.**")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Auto-reply listener (no @rishabh — passive, replies to others)
+# ══════════════════════════════════════════════════════════════════════════
 
 @CipherElite.on(events.NewMessage())
 async def auto_reply_handler(event):
@@ -171,75 +173,84 @@ async def auto_reply_handler(event):
     except Exception:
         return
 
+    # Auto AI is private-chats only — ignore all group / channel messages
     if not event.is_private:
         return
 
-    try:
-        sender = await event.get_sender()
-        if getattr(sender, "bot", False):
-            return
-    except Exception as e:
-        print("Exception getting sender:", e)
-        return
-
-    # Ignore outgoing messages (your own)
-    if event.out:
-        return
-
-    # Do not reply if user is approved (pmpermit)
-    db_path = "DB/assistant_db.json"
-    chat_id = str(event.chat_id)
-    if os.path.exists(db_path):
-        try:
-            with open(db_path, "r", encoding="utf-8") as f:
-                db = json.load(f)
-            if "approved_users" in db and chat_id in db["approved_users"]:
-                return
-        except Exception as e:
-            print("Exception checking approved users:", e)
-
+    # Ignore commands to prevent loops
     if event.text and event.text.startswith((".", "/", "!")):
         return
+
+    # Outgoing message → auto-approve user so AI stops replying
+    if getattr(event, 'out', False):
+        db_path = "DB/assistant_db.json"
+        if os.path.exists(db_path):
+            try:
+                with open(db_path, "r", encoding="utf-8") as f:
+                    db = json.load(f)
+                user_id = str(event.chat_id)
+                if user_id not in db.get("approved_users", []):
+                    db.setdefault("approved_users", []).append(user_id)
+                    with open(db_path, "w", encoding="utf-8") as f:
+                        json.dump(db, f, indent=2, ensure_ascii=False)
+            except Exception:
+                pass
+        return
+
+    # Fix: pmpermit handles ALL unapproved users — skip them here to avoid double-replies.
+    # Only auto-respond when the user IS approved (pmpermit ignores approved users).
+    # If pmpermit is disabled, respond to everyone.
+    if event.is_private:
+        db_path = "DB/assistant_db.json"
+        if os.path.exists(db_path):
+            try:
+                with open(db_path, "r", encoding="utf-8") as f:
+                    db = json.load(f)
+                cfg = db.get("config", {})
+                pmpermit_enabled = cfg.get("pmpermit_enabled", True)
+                if pmpermit_enabled:
+                    # pmpermit is ON → only respond to approved contacts
+                    if str(event.chat_id) not in db.get("approved_users", []):
+                        return  # unapproved: let pmpermit handle it
+            except Exception:
+                pass
 
     text = event.text
     if not text:
         return
 
-    if not is_english(text):
-        await event.respond("I'm sorry, I can only understand and respond in English. Please message me in English for assistance.")
-        return
+    chat_id = event.chat_id
+    if chat_id not in conversation_history:
+        conversation_history[chat_id] = [get_system_prompt()]
 
-    chat_id_int = event.chat_id
-    if chat_id_int not in conversation_history:
-        conversation_history[chat_id_int] = [get_system_prompt()]
-
-    conversation_history[chat_id_int].append({"role": "user", "content": text})
-    if len(conversation_history[chat_id_int]) > 5:
-        conversation_history[chat_id_int] = [get_system_prompt()] + conversation_history[chat_id_int][-4:]
+    conversation_history[chat_id].append({"role": "user", "content": text})
+    if len(conversation_history[chat_id]) > 5:
+        conversation_history[chat_id] = [get_system_prompt()] + conversation_history[chat_id][-4:]
 
     try:
-        thinking_msg = await event.respond("**[░░░░░░░░░░]  0%** ⏳ `Connecting to PARADOX AI...`")
+        thinking_msg = await event.respond("✨ *Let me cook...* 🍳")
 
         api_task = asyncio.create_task(
-            asyncio.wait_for(make_ai_request(conversation_history[chat_id_int]), timeout=30.0)
+            asyncio.wait_for(make_ai_request(conversation_history[chat_id]), timeout=30.0)
         )
-        anim_task = asyncio.create_task(animate_thinking(thinking_msg, api_task))
 
         try:
             response = await api_task
         except asyncio.TimeoutError:
             response = "❌ Timeout"
-        finally:
-            if not anim_task.done():
-                anim_task.cancel()
 
         if not str(response).startswith(("❌", "⏳")):
-            conversation_history[chat_id_int].append({"role": "assistant", "content": str(response)})
+            conversation_history[chat_id].append({"role": "assistant", "content": str(response)})
             await thinking_msg.edit(str(response))
         else:
             await thinking_msg.delete()
-    except Exception as e:
-        print("Exception in auto_reply_handler:", e)
+    except Exception:
+        pass
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  .pai — Main AI query
+# ══════════════════════════════════════════════════════════════════════════
 
 @CipherElite.on(events.NewMessage(pattern=r"\.pai(?:\s+(.*))?"))
 @rishabh()
@@ -256,6 +267,7 @@ async def ai_handler(event):
 
         query = event.pattern_match.group(1)
 
+        # Include replied-to message as context
         try:
             reply_msg = await event.get_reply_message()
             if reply_msg and reply_msg.text:
@@ -275,11 +287,7 @@ async def ai_handler(event):
             await event.reply("📝 **Query too long!** Keep it under 2000 characters.")
             return
 
-        if not is_english(query):
-            await event.reply("I'm sorry, I can only understand and respond in English. Please message me in English for assistance.")
-            return
-
-        thinking_msg = await event.respond("**[░░░░░░░░░░]  0%** ⏳ `Connecting to PARADOX AI...`")
+        thinking_msg = await event.respond("✨ *Let me cook...* 🍳")
 
         chat_id = event.chat_id
         if chat_id not in conversation_history:
@@ -292,15 +300,11 @@ async def ai_handler(event):
         api_task = asyncio.create_task(
             asyncio.wait_for(make_ai_request(conversation_history[chat_id]), timeout=45.0)
         )
-        anim_task = asyncio.create_task(animate_thinking(thinking_msg, api_task))
 
         try:
             response = await api_task
         except asyncio.TimeoutError:
             response = "⏰ **Timeout:** AI took too long. Try a shorter question."
-        finally:
-            if not anim_task.done():
-                anim_task.cancel()
 
         if response.startswith(("❌", "⏳")):
             await thinking_msg.edit(response)
@@ -327,6 +331,11 @@ async def ai_handler(event):
             except Exception:
                 pass
 
+
+# ══════════════════════════════════════════════════════════════════════════
+#  .paiset — Set NVIDIA key
+# ══════════════════════════════════════════════════════════════════════════
+
 @CipherElite.on(events.NewMessage(pattern=r"\.paiset(?:\s+(.*))?"))
 @rishabh()
 async def aiset_handler(event):
@@ -347,6 +356,11 @@ async def aiset_handler(event):
     except Exception as e:
         await event.reply(f"❌ **Error:** {str(e)}")
 
+
+# ══════════════════════════════════════════════════════════════════════════
+#  .paigemini — Set Gemini key
+# ══════════════════════════════════════════════════════════════════════════
+
 @CipherElite.on(events.NewMessage(pattern=r"\.paigemini(?:\s+(.*))?"))
 @rishabh()
 async def aigemini_handler(event):
@@ -358,7 +372,7 @@ async def aigemini_handler(event):
             return
 
         ai_config.set_gemini_key(api_key.strip())
-        ai_config.set_provider("gemini")
+        ai_config.set_provider("gemini")      # auto-switch to Gemini
         msg = await event.respond("✅ **Gemini API Key set! Provider auto-switched to Gemini.**")
         await asyncio.sleep(5)
         try:
@@ -367,6 +381,11 @@ async def aigemini_handler(event):
             pass
     except Exception as e:
         await event.reply(f"❌ **Error:** {str(e)}")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  .paimode — Switch provider
+# ══════════════════════════════════════════════════════════════════════════
 
 @CipherElite.on(events.NewMessage(pattern=r"(?i)\.paimode(?:\s+(nvidia|gemini))?"))
 @rishabh()
@@ -384,6 +403,11 @@ async def aimode_handler(event):
         await event.reply(f"✅ **AI Provider switched to: {mode.upper()}**")
     except Exception as e:
         await event.reply(f"❌ **Error:** {str(e)}")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  .paitest — Test connection
+# ══════════════════════════════════════════════════════════════════════════
 
 @CipherElite.on(events.NewMessage(pattern=r"\.paitest"))
 @rishabh()
@@ -412,6 +436,11 @@ async def aitest_handler(event):
     except Exception as e:
         await event.reply(f"❌ **Test Error:** {str(e)}")
 
+
+# ══════════════════════════════════════════════════════════════════════════
+#  .paiclear — Clear history
+# ══════════════════════════════════════════════════════════════════════════
+
 @CipherElite.on(events.NewMessage(pattern=r"\.paiclear"))
 @rishabh()
 async def aiclear_handler(event):
@@ -424,6 +453,11 @@ async def aiclear_handler(event):
             await event.reply("📭 **No history found** for this chat.")
     except Exception as e:
         await event.reply(f"❌ **Error:** {str(e)}")
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  .paistatus — Show status
+# ══════════════════════════════════════════════════════════════════════════
 
 @CipherElite.on(events.NewMessage(pattern=r"\.paistatus"))
 @rishabh()
@@ -449,5 +483,6 @@ async def aistatus_handler(event):
         )
     except Exception as e:
         await event.reply(f"❌ **Error:** {str(e)}")
+
 
 print("✅ PARADOX AI Plugin loaded successfully")
