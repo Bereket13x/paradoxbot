@@ -34,16 +34,15 @@ def init(client):
 
 def run_speedtest():
     start = time()
-    s = speedtest.Speedtest(secure=True)
     try:
+        s = speedtest.Speedtest(secure=True)
         s.get_best_server()
     except Exception:
-        # Workaround for 'Unable to connect to servers to test latency'
-        s.get_servers()
-        if not s.servers:
-            raise Exception("Failed to fetch server list.")
-        first_distance = sorted(s.servers.keys())[0]
-        s.best = s.servers[first_distance][0]
+        try:
+            s = speedtest.Speedtest(secure=False)
+            s.get_best_server()
+        except Exception as e:
+            raise Exception(f"Speedtest.net API is blocking or rate-limiting your bot's IP. Try again later. (Error: {e})")
     s.download()
     s.upload()
     end = time()
