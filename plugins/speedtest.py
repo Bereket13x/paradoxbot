@@ -39,14 +39,21 @@ def run_speedtest():
     start = time()
     
     try:
-        # Step 1: Get the nearest server ID directly to skip the ping flood that gets IP blocked
-        list_proc = subprocess.run(["speedtest-cli", "--list", "--secure"], capture_output=True, text=True, check=True)
+        # Step 1: Get the nearest server ID directly
+        list_proc = subprocess.run(["speedtest-cli", "--list", "--secure"], capture_output=True, text=True)
         match = re.search(r"^\s*(\d+)\)", list_proc.stdout, re.MULTILINE)
+        
         if not match:
-            raise Exception("No servers found from Speedtest.net API.")
+            list_proc = subprocess.run(["speedtest-cli", "--list"], capture_output=True, text=True)
+            match = re.search(r"^\s*(\d+)\)", list_proc.stdout, re.MULTILINE)
+            
+        if not match:
+            err = list_proc.stderr.strip() if list_proc.stderr else list_proc.stdout.strip()
+            raise Exception(f"Output: {err[:250]}")
+            
         server_id = match.group(1)
     except Exception as e:
-        raise Exception(f"Failed to retrieve servers: {e}")
+        raise Exception(f"Server Fetch Error: {e}")
 
     try:
         # Step 2: Force test on that server ID ONLY
