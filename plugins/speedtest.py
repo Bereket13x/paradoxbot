@@ -1,4 +1,4 @@
-# =============================================================================
+\# =============================================================================
 #  PARADOX Userbot Plugin
 #
 #  Plugin Name:    speedtest
@@ -7,6 +7,8 @@
 
 from time import time
 import asyncio
+import subprocess
+import json
 import speedtest
 from telethon import events
 from utils.utils import CipherElite
@@ -34,27 +36,23 @@ def init(client):
 
 def run_speedtest():
     start = time()
-    s = speedtest.Speedtest(secure=True)
-    s.get_servers()
-    
-    # If the secure connection returns an empty list, fallback to insecure
-    if not s.servers:
-        s = speedtest.Speedtest(secure=False)
-        s.get_servers()
+    try:
+        proc = subprocess.run(
+            ["speedtest-cli", "--json", "--share", "--secure"],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        response_dict = json.loads(proc.stdout)
+    except subprocess.CalledProcessError as e:
+        raise Exception(f"CLI Error: {e.stderr.strip() if e.stderr else e.stdout.strip()}")
+    except Exception as e:
+        raise Exception(f"Failed to run speedtest-cli: {e}")
         
-    if not s.servers:
-        raise Exception("Speedtest.net API is currently blocking or rate-limiting your bot's IP. Try again later.")
-
-    # Assign the geographically nearest server directly to bypass the failing ping checks
-    s._best = s.servers[min(s.servers.keys())][0]
-    s.download()
-    s.upload()
     end = time()
     ms = round(end - start, 2)
     
-    response_dict = s.results.dict()
-    share_link = s.results.share()
-    
+    share_link = response_dict.get("share")
     return ms, response_dict, share_link
 
 @CipherElite.on(events.NewMessage(pattern=r"\.speedtest(?:\s|$)([\s\S]*)"))
