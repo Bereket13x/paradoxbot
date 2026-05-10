@@ -1,4 +1,4 @@
-\# =============================================================================
+# =============================================================================
 #  PARADOX Userbot Plugin
 #
 #  Plugin Name:    speedtest
@@ -9,7 +9,6 @@ from time import time
 import asyncio
 import subprocess
 import json
-import speedtest
 from telethon import events
 from utils.utils import CipherElite
 from utils.decorators import rishabh
@@ -44,6 +43,8 @@ def run_speedtest():
             check=True
         )
         response_dict = json.loads(proc.stdout)
+    except FileNotFoundError:
+        raise Exception("speedtest-cli is not installed or not in PATH! Run 'pip install speedtest-cli' inside your bot's environment.")
     except subprocess.CalledProcessError as e:
         raise Exception(f"CLI Error: {e.stderr.strip() if e.stderr else e.stdout.strip()}")
     except Exception as e:
