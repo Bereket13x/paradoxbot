@@ -33,11 +33,25 @@ def init(client):
     desc = "Botserver's speedtest by ookla."
     add_handler("speedtest", commands, desc)
 
+import re
+
 def run_speedtest():
     start = time()
+    
     try:
+        # Step 1: Get the nearest server ID directly to skip the ping flood that gets IP blocked
+        list_proc = subprocess.run(["speedtest-cli", "--list", "--secure"], capture_output=True, text=True, check=True)
+        match = re.search(r"^\s*(\d+)\)", list_proc.stdout, re.MULTILINE)
+        if not match:
+            raise Exception("No servers found from Speedtest.net API.")
+        server_id = match.group(1)
+    except Exception as e:
+        raise Exception(f"Failed to retrieve servers: {e}")
+
+    try:
+        # Step 2: Force test on that server ID ONLY
         proc = subprocess.run(
-            ["speedtest-cli", "--json", "--share", "--secure"],
+            ["speedtest-cli", "--server", server_id, "--json", "--share", "--secure"],
             capture_output=True,
             text=True,
             check=True
