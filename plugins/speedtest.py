@@ -38,9 +38,11 @@ def run_speedtest():
         s = speedtest.Speedtest(secure=True)
         s.get_best_server()
     except Exception:
+        # Bypassing the ping-based best server check, which usually causes the error
         try:
-            s = speedtest.Speedtest(secure=False)
-            s.get_best_server()
+            s = speedtest.Speedtest(secure=True)
+            s.get_servers()
+            s._best = s.servers[min(s.servers.keys())][0]
         except Exception as e:
             raise Exception(f"Speedtest.net API is blocking or rate-limiting your bot's IP. Try again later. (Error: {e})")
     s.download()
