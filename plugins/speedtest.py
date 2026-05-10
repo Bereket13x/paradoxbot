@@ -35,7 +35,15 @@ def init(client):
 def run_speedtest():
     start = time()
     s = speedtest.Speedtest(secure=True)
-    s.get_best_server()
+    try:
+        s.get_best_server()
+    except Exception:
+        # Workaround for 'Unable to connect to servers to test latency'
+        s.get_servers()
+        if not s.servers:
+            raise Exception("Failed to fetch server list.")
+        first_distance = sorted(s.servers.keys())[0]
+        s.best = s.servers[first_distance][0]
     s.download()
     s.upload()
     end = time()
