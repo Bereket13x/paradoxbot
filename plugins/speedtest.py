@@ -128,3 +128,4 @@ async def speedtest_cmd(event):
             
     except Exception as exc:
         await catevent.edit(f"`Speedtest failed!`\n\n**Error:** `{str(exc)}`")
+
