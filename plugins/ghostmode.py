@@ -13,9 +13,10 @@ import random
 from pathlib import Path
 
 from telethon import events
-from telethon.tl.functions.messages import ReadHistoryRequest
+from telethon.tl.functions.messages import ReadHistoryRequest, MarkDialogUnreadRequest
 from telethon.tl.functions.channels import ReadHistoryRequest as ChannelReadHistoryRequest
 from telethon.tl.functions.account import UpdateStatusRequest
+from telethon.tl.types import InputDialogPeer
 
 from utils.utils import CipherElite
 from utils.decorators import rishabh
@@ -52,7 +53,9 @@ def load_ghost_config():
     if GHOST_CONFIG_FILE.exists():
         try:
             data = json.loads(GHOST_CONFIG_FILE.read_text(encoding="utf-8"))
-            ghost_config.update(data)
+            # Merge properly so lists aren't replaced with wrong type
+            for k, v in data.items():
+                ghost_config[k] = v
         except Exception:
             pass
 
@@ -73,6 +76,9 @@ load_ghost_config()
 # ── Plugin Registration ────────────────────────────────────────────────────────
 
 def init(client):
+    """Called by startup loader after client is ready."""
+    global _anti_online_task
+
     commands = [
         ".ghost - Show ghost mode dashboard with all toggles",
         ".antiseen on/off - Toggle anti-seen (read receipts blocked)",
@@ -90,15 +96,27 @@ def init(client):
     desc = "🕵️ Full stealth suite — become invisible on Telegram"
     add_handler("ghostmode", commands, desc)
 
+    # ── Resume anti-online loop if it was enabled before restart ──────────────
+    if ghost_config.get("anti_online", False):
+        try:
+            loop = asyncio.get_event_loop()
+            _anti_online_task = loop.create_task(_offline_loop())
+            print("👻 Ghost Mode: Anti-Online loop started (resumed from config)")
+        except Exception as e:
+            print(f"Ghost Mode: Could not start anti-online loop: {e}")
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
 def is_ghost_active_for(chat_id=None, user_id=None):
+    """Returns True if ghost features should apply to this chat/user."""
     if ghost_config["mode"] == "global":
+        # Active everywhere except blacklisted chats
         if chat_id and chat_id in ghost_config["blacklist_chats"]:
             return False
         return True
     else:
+        # Selective: only for whitelisted chats/users
         if user_id and user_id in ghost_config["ghost_users"]:
             return True
         if chat_id and chat_id in ghost_config["whitelist_chats"]:
@@ -106,7 +124,7 @@ def is_ghost_active_for(chat_id=None, user_id=None):
         return False
 
 
-def format_status(enabled):
+def fmt(enabled):
     return "🟢 ON" if enabled else "🔴 OFF"
 
 
@@ -117,31 +135,26 @@ def format_status(enabled):
 async def ghost_dashboard(event):
     gc = ghost_config
     mode_display = "🌐 Global" if gc["mode"] == "global" else "🎯 Selective"
-    ghosted_users = len(gc["ghost_users"])
-    ghosted_chats = len(gc["whitelist_chats"])
-    blacklisted = len(gc["blacklist_chats"])
-
     text = (
         "🕵️ **𝐏𝐀𝐑𝐀𝐃𝐎𝐗 𝐆𝐇𝐎𝐒𝐓 𝐌𝐎𝐃𝐄** 🕵️\n"
         "⟡ ═══════════════════ ⟡\n\n"
-        f"  🚫 **Anti-Seen:**    {format_status(gc['anti_seen'])}\n"
-        f"  ⌨️ **Anti-Typing:**  {format_status(gc['anti_typing'])}\n"
-        f"  👻 **Anti-Online:**  {format_status(gc['anti_online'])}\n"
-        f"  📨 **Ghost Read:**   {format_status(gc['ghost_read'])}\n"
-        f"  ⏱️ **Delayed Seen:** {format_status(gc['delayed_seen'])}\n\n"
+        f"  🚫 **Anti-Seen:**    {fmt(gc['anti_seen'])}\n"
+        f"  ⌨️ **Anti-Typing:**  {fmt(gc['anti_typing'])}\n"
+        f"  👻 **Anti-Online:**  {fmt(gc['anti_online'])}\n"
+        f"  📨 **Ghost Read:**   {fmt(gc['ghost_read'])}\n"
+        f"  ⏱️ **Delayed Seen:** {fmt(gc['delayed_seen'])}\n\n"
         "⟡ ═══════════════════ ⟡\n\n"
         f"  📋 **Mode:** {mode_display}\n"
-        f"  👤 **Ghosted Users:** `{ghosted_users}`\n"
-        f"  💬 **Ghosted Chats:** `{ghosted_chats}`\n"
-        f"  🚷 **Blacklisted:**  `{blacklisted}`\n"
+        f"  👤 **Ghosted Users:** `{len(gc['ghost_users'])}`\n"
+        f"  💬 **Ghosted Chats:** `{len(gc['whitelist_chats'])}`\n"
+        f"  🚷 **Excluded Chats:** `{len(gc['blacklist_chats'])}`\n"
     )
     if gc["delayed_seen"]:
         text += f"\n  ⏰ **Delay Range:** `{gc['delay_min']}-{gc['delay_max']}` min\n"
     text += (
         "\n⟡ ═══════════════════ ⟡\n"
         "💡 `.antiseen` `.antityping` `.antionline`\n"
-        "   `.ghostread` `.delayseen` `.ghostuser`\n"
-        "   `.ghostchat` `.ghostmode` `.ghostreset`"
+        "   `.ghostread` `.delayseen` `.ghostreset`"
     )
     await event.reply(text)
 
@@ -152,30 +165,37 @@ async def ghost_dashboard(event):
 @rishabh()
 async def toggle_antiseen(event):
     arg = event.pattern_match.group(1)
-    if arg:
-        ghost_config["anti_seen"] = (arg.lower() == "on")
-    else:
-        ghost_config["anti_seen"] = not ghost_config["anti_seen"]
+    ghost_config["anti_seen"] = (arg.lower() == "on") if arg else not ghost_config["anti_seen"]
+    # If turning on, disable delayed_seen (they conflict)
+    if ghost_config["anti_seen"]:
+        ghost_config["delayed_seen"] = False
     save_ghost_config()
     state = ghost_config["anti_seen"]
-    emoji = "🟢" if state else "🔴"
-    msg = "✅ Read receipts **blocked**. No blue ticks." if state else "❌ Read receipts **enabled**."
-    await event.reply(f"🕵️ **Anti-Seen** {emoji}\n\n{msg}")
+    msg = (
+        "✅ **Active!** Senders will **never see blue ticks** from you.\n\n"
+        "⚠️ This only works if you read messages through the userbot.\n"
+        "If your phone/PC Telegram app is open, it will still send receipts."
+        if state else
+        "❌ Read receipts **enabled** again."
+    )
+    await event.reply(f"🚫 **Anti-Seen** {'🟢 ON' if state else '🔴 OFF'}\n\n{msg}")
 
 
 @CipherElite.on(events.NewMessage(pattern=r"\.antityping(?:\s+(on|off))?$"))
 @rishabh()
 async def toggle_antityping(event):
     arg = event.pattern_match.group(1)
-    if arg:
-        ghost_config["anti_typing"] = (arg.lower() == "on")
-    else:
-        ghost_config["anti_typing"] = not ghost_config["anti_typing"]
+    ghost_config["anti_typing"] = (arg.lower() == "on") if arg else not ghost_config["anti_typing"]
     save_ghost_config()
     state = ghost_config["anti_typing"]
-    emoji = "🟢" if state else "🔴"
-    msg = '✅ "Typing..." indicator is now **hidden**.' if state else "❌ Typing indicator is **visible**."
-    await event.reply(f"⌨️ **Anti-Typing** {emoji}\n\n{msg}")
+    msg = (
+        '✅ **Active!** "Typing..." indicator is **suppressed**.\n\n'
+        "ℹ️ Telethon userbots don't broadcast typing by default.\n"
+        "This blocks any plugin that might trigger it."
+        if state else
+        "❌ Anti-typing **disabled**."
+    )
+    await event.reply(f"⌨️ **Anti-Typing** {'🟢 ON' if state else '🔴 OFF'}\n\n{msg}")
 
 
 @CipherElite.on(events.NewMessage(pattern=r"\.antionline(?:\s+(on|off))?$"))
@@ -183,17 +203,21 @@ async def toggle_antityping(event):
 async def toggle_antionline(event):
     global _anti_online_task
     arg = event.pattern_match.group(1)
-    if arg:
-        ghost_config["anti_online"] = (arg.lower() == "on")
-    else:
-        ghost_config["anti_online"] = not ghost_config["anti_online"]
+    ghost_config["anti_online"] = (arg.lower() == "on") if arg else not ghost_config["anti_online"]
     save_ghost_config()
     state = ghost_config["anti_online"]
 
     if state:
+        # Start the offline keep-alive loop
         if _anti_online_task is None or _anti_online_task.done():
             _anti_online_task = asyncio.create_task(_offline_loop())
+        msg = (
+            "✅ **Active!** You now appear **permanently offline**.\n\n"
+            "⚠️ If your phone Telegram app is open, it may override this.\n"
+            "For best results, close all other Telegram sessions."
+        )
     else:
+        # Stop the loop and set back to online
         if _anti_online_task and not _anti_online_task.done():
             _anti_online_task.cancel()
             _anti_online_task = None
@@ -201,42 +225,43 @@ async def toggle_antionline(event):
             await event.client(UpdateStatusRequest(offline=False))
         except Exception:
             pass
+        msg = "❌ Anti-Online **disabled**. Online status is visible again."
 
-    emoji = "🟢" if state else "🔴"
-    msg = "✅ You appear **permanently offline**." if state else "❌ Online status is **visible**."
-    await event.reply(f"👻 **Anti-Online** {emoji}\n\n{msg}")
+    await event.reply(f"👻 **Anti-Online** {'🟢 ON' if state else '🔴 OFF'}\n\n{msg}")
 
 
 @CipherElite.on(events.NewMessage(pattern=r"\.ghostread(?:\s+(on|off))?$"))
 @rishabh()
 async def toggle_ghostread(event):
     arg = event.pattern_match.group(1)
-    if arg:
-        ghost_config["ghost_read"] = (arg.lower() == "on")
-    else:
-        ghost_config["ghost_read"] = not ghost_config["ghost_read"]
+    ghost_config["ghost_read"] = (arg.lower() == "on") if arg else not ghost_config["ghost_read"]
     save_ghost_config()
     state = ghost_config["ghost_read"]
-    emoji = "🟢" if state else "🔴"
-    msg = "✅ Messages **forwarded to Saved** for silent reading." if state else "❌ Ghost read **disabled**."
-    await event.reply(f"📨 **Ghost Read** {emoji}\n\n{msg}")
+    msg = (
+        "✅ **Active!** Incoming PMs will be **silently forwarded** to your Saved Messages.\n"
+        "Read them there — no blue ticks sent to the sender."
+        if state else
+        "❌ Ghost Read **disabled**."
+    )
+    await event.reply(f"📨 **Ghost Read** {'🟢 ON' if state else '🔴 OFF'}\n\n{msg}")
 
 
 @CipherElite.on(events.NewMessage(pattern=r"\.delayseen(?:\s+(on|off))?$"))
 @rishabh()
 async def toggle_delayseen(event):
     arg = event.pattern_match.group(1)
-    if arg:
-        ghost_config["delayed_seen"] = (arg.lower() == "on")
-    else:
-        ghost_config["delayed_seen"] = not ghost_config["delayed_seen"]
+    ghost_config["delayed_seen"] = (arg.lower() == "on") if arg else not ghost_config["delayed_seen"]
+    # Delayed seen and anti_seen conflict — turn off anti_seen if enabling delayed
+    if ghost_config["delayed_seen"]:
+        ghost_config["anti_seen"] = False
     save_ghost_config()
     state = ghost_config["delayed_seen"]
-    emoji = "🟢" if state else "🔴"
-    msg = "✅ Messages marked read after a **random delay**." if state else "❌ Delayed seen **disabled**."
-    if state:
-        msg += f"\n⏰ Delay: `{ghost_config['delay_min']}-{ghost_config['delay_max']}` min"
-    await event.reply(f"⏱️ **Delayed Seen** {emoji}\n\n{msg}")
+    msg = (
+        f"✅ **Active!** Messages marked read after `{ghost_config['delay_min']}-{ghost_config['delay_max']}` random minutes.\nLooks human — not instant!"
+        if state else
+        "❌ Delayed Seen **disabled**."
+    )
+    await event.reply(f"⏱️ **Delayed Seen** {'🟢 ON' if state else '🔴 OFF'}\n\n{msg}")
 
 
 @CipherElite.on(events.NewMessage(pattern=r"\.ghostdelay(?:\s+(\d+))?(?:\s+(\d+))?$"))
@@ -252,17 +277,12 @@ async def set_ghost_delay(event):
             "**Example:** `.ghostdelay 5 30`"
         )
         return
-    min_delay = int(min_val)
-    max_delay = int(max_val) if max_val else min_delay + 10
-    if min_delay >= max_delay:
-        max_delay = min_delay + 5
-    ghost_config["delay_min"] = max(1, min_delay)
-    ghost_config["delay_max"] = max(2, max_delay)
+    mn = max(1, int(min_val))
+    mx = max(mn + 1, int(max_val) if max_val else mn + 10)
+    ghost_config["delay_min"] = mn
+    ghost_config["delay_max"] = mx
     save_ghost_config()
-    await event.reply(
-        f"⏰ **Delay Updated!**\n\n"
-        f"Read after `{ghost_config['delay_min']}-{ghost_config['delay_max']}` minutes"
-    )
+    await event.reply(f"⏰ **Delay updated!**\n\nMessages marked read after `{mn}-{mx}` minutes.")
 
 
 # ── User/Chat Controls ────────────────────────────────────────────────────────
@@ -284,14 +304,14 @@ async def ghost_user_toggle(event):
             user = await event.client.get_entity(reply.sender_id)
         else:
             user = await event.client.get_entity(target.lstrip("@"))
-        user_id = user.id
-        name = getattr(user, "first_name", str(user_id))
-        if user_id in ghost_config["ghost_users"]:
-            ghost_config["ghost_users"].remove(user_id)
+        uid = user.id
+        name = getattr(user, "first_name", str(uid))
+        if uid in ghost_config["ghost_users"]:
+            ghost_config["ghost_users"].remove(uid)
             save_ghost_config()
-            await event.reply(f"👤 **Unghosted** `{name}`")
+            await event.reply(f"👤 **Unghosted** `{name}`\n\nNormal behavior restored for this user.")
         else:
-            ghost_config["ghost_users"].append(user_id)
+            ghost_config["ghost_users"].append(uid)
             save_ghost_config()
             await event.reply(f"👻 **Ghosted** `{name}`\n\nYou are now invisible to this user.")
     except Exception as e:
@@ -306,11 +326,11 @@ async def ghost_chat_toggle(event):
         if chat_id in ghost_config["blacklist_chats"]:
             ghost_config["blacklist_chats"].remove(chat_id)
             save_ghost_config()
-            await event.reply("👻 **Ghost re-enabled** for this chat.")
+            await event.reply("👻 **Ghost re-enabled** for this chat.\n\nStealth mode is now active here.")
         else:
             ghost_config["blacklist_chats"].append(chat_id)
             save_ghost_config()
-            await event.reply("🔓 **Ghost disabled** for this chat.")
+            await event.reply("🔓 **Ghost disabled** for this chat.\n\nNormal behavior in this chat.")
     else:
         if chat_id in ghost_config["whitelist_chats"]:
             ghost_config["whitelist_chats"].remove(chat_id)
@@ -319,7 +339,7 @@ async def ghost_chat_toggle(event):
         else:
             ghost_config["whitelist_chats"].append(chat_id)
             save_ghost_config()
-            await event.reply("👻 **Ghost enabled** for this chat.")
+            await event.reply("👻 **Ghost enabled** for this chat.\n\nStealth mode now active here.")
 
 
 @CipherElite.on(events.NewMessage(pattern=r"\.ghostmode(?:\s+(global|selective))?$"))
@@ -330,16 +350,16 @@ async def set_ghost_mode(event):
         current = ghost_config["mode"]
         await event.reply(
             f"📋 **Ghost Mode:** `{current}`\n\n"
-            "• `.ghostmode global` — Ghost everywhere\n"
+            "• `.ghostmode global` — Ghost everywhere (blacklist to exclude)\n"
             "• `.ghostmode selective` — Ghost specific users/chats only"
         )
         return
     ghost_config["mode"] = mode.lower()
     save_ghost_config()
     if mode == "global":
-        await event.reply("🌐 **Global Mode** activated!\n\nGhost in ALL chats. Use `.ghostchat` to exclude.")
+        await event.reply("🌐 **Global Mode** activated!\n\nGhost active in ALL chats. Use `.ghostchat` to exclude specific ones.")
     else:
-        await event.reply("🎯 **Selective Mode** activated!\n\nUse `.ghostuser` / `.ghostchat` to add targets.")
+        await event.reply("🎯 **Selective Mode** activated!\n\nGhost OFF everywhere. Use `.ghostuser` / `.ghostchat` to enable per target.")
 
 
 @CipherElite.on(events.NewMessage(pattern=r"\.ghostlist$"))
@@ -364,8 +384,7 @@ async def ghost_list(event):
         for cid in gc["blacklist_chats"]:
             try:
                 chat = await event.client.get_entity(cid)
-                name = getattr(chat, "title", str(cid))
-                text += f"  • `{name}`\n"
+                text += f"  • `{getattr(chat, 'title', str(cid))}`\n"
             except Exception:
                 text += f"  • ID: `{cid}`\n"
     elif gc["mode"] == "selective" and gc["whitelist_chats"]:
@@ -373,8 +392,7 @@ async def ghost_list(event):
         for cid in gc["whitelist_chats"]:
             try:
                 chat = await event.client.get_entity(cid)
-                name = getattr(chat, "title", str(cid))
-                text += f"  • `{name}`\n"
+                text += f"  • `{getattr(chat, 'title', str(cid))}`\n"
             except Exception:
                 text += f"  • ID: `{cid}`\n"
     else:
@@ -395,41 +413,49 @@ async def ghost_reset(event):
         await event.client(UpdateStatusRequest(offline=False))
     except Exception:
         pass
-    await event.reply(
-        "🔄 **Ghost Mode Reset!**\n\n"
-        "All settings restored to defaults. All features **OFF**."
-    )
+    await event.reply("🔄 **Ghost Mode Reset!**\n\nAll settings restored to defaults. All features **OFF**.")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-#  EVENT WATCHERS — Core stealth engine
+#  STEALTH ENGINE — Background Workers & Event Watchers
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def _offline_loop():
-    """Continuously set offline status every 30 seconds."""
-    while ghost_config.get("anti_online", False):
+    """
+    Anti-Online core: sends UpdateStatus(offline=True) every 25 seconds.
+    Telegram resets "last seen" to online whenever you do anything, so we
+    continuously push it back to offline.
+    """
+    print("👻 Ghost Mode: Anti-Online loop running...")
+    while True:
+        if not ghost_config.get("anti_online", False):
+            break
         try:
             await CipherElite(UpdateStatusRequest(offline=True))
-        except Exception:
-            pass
-        await asyncio.sleep(30)
+        except Exception as e:
+            print(f"Ghost Mode anti-online error: {e}")
+        await asyncio.sleep(25)
+    print("👻 Ghost Mode: Anti-Online loop stopped.")
 
 
 @CipherElite.on(events.NewMessage(incoming=True))
 async def ghost_incoming_watcher(event):
-    """Handle anti-seen, ghost-read, and delayed-seen for incoming messages."""
-    if not any([
-        ghost_config.get("anti_seen"),
-        ghost_config.get("delayed_seen"),
-        ghost_config.get("ghost_read"),
-    ]):
+    """
+    Core watcher for:
+    - Anti-Seen: marks dialog as unread immediately after receiving
+    - Ghost Read: forwards message to Saved Messages
+    - Delayed Seen: schedules a read receipt after a random delay
+    """
+    gc = ghost_config
+
+    # Quick check — bail out if nothing is active
+    if not any([gc.get("anti_seen"), gc.get("delayed_seen"), gc.get("ghost_read")]):
         return
 
     sender_id = event.sender_id
     chat_id = event.chat_id
-    if not is_ghost_active_for(chat_id=chat_id, user_id=sender_id):
-        return
 
+    # Don't process our own messages (e.g., from Saved Messages)
     try:
         me = await event.client.get_me()
         if sender_id == me.id:
@@ -437,26 +463,46 @@ async def ghost_incoming_watcher(event):
     except Exception:
         return
 
-    # Ghost Read: forward to Saved Messages
-    if ghost_config.get("ghost_read") and event.is_private:
+    # Check scope
+    if not is_ghost_active_for(chat_id=chat_id, user_id=sender_id):
+        return
+
+    # ── Ghost Read: forward to Saved Messages silently ─────────────────────
+    if gc.get("ghost_read") and event.is_private:
         try:
             await event.forward_to("me")
         except Exception as e:
-            print(f"Ghost Read error: {e}")
+            print(f"Ghost Read forward error: {e}")
 
-    # Delayed Seen: schedule read after random delay
-    if ghost_config.get("delayed_seen") and not ghost_config.get("anti_seen"):
-        delay_min = ghost_config.get("delay_min", 5)
-        delay_max = ghost_config.get("delay_max", 30)
-        delay = random.randint(delay_min * 60, delay_max * 60)
+    # ── Anti-Seen: mark dialog as unread right after receiving ─────────────
+    if gc.get("anti_seen") and event.is_private:
+        try:
+            # Small delay to let Telegram process the receipt first, then unmark
+            await asyncio.sleep(1)
+            peer = await event.client.get_input_entity(chat_id)
+            await event.client(MarkDialogUnreadRequest(
+                peer=InputDialogPeer(peer=peer),
+                unread=True
+            ))
+        except Exception as e:
+            print(f"Ghost Mode anti-seen error: {e}")
 
+    # ── Delayed Seen: schedule read receipt after random delay ─────────────
+    if gc.get("delayed_seen") and not gc.get("anti_seen"):
+        delay_min = gc.get("delay_min", 5)
+        delay_max = gc.get("delay_max", 30)
+        delay_secs = random.randint(delay_min * 60, delay_max * 60)
+
+        # Cancel any existing pending read task for this chat
         if chat_id in _delayed_seen_tasks:
-            task = _delayed_seen_tasks[chat_id]
-            if not task.done():
-                task.cancel()
+            old = _delayed_seen_tasks[chat_id]
+            if not old.done():
+                old.cancel()
 
-        async def _delayed_read(c_id, msg_id, delay_secs):
-            await asyncio.sleep(delay_secs)
+        async def _delayed_read(c_id, msg_id, secs):
+            await asyncio.sleep(secs)
+            if not ghost_config.get("delayed_seen"):
+                return  # was turned off while waiting
             try:
                 entity = await CipherElite.get_entity(c_id)
                 if hasattr(entity, "broadcast"):
@@ -471,23 +517,5 @@ async def ghost_incoming_watcher(event):
                 print(f"Delayed seen error: {e}")
 
         _delayed_seen_tasks[chat_id] = asyncio.create_task(
-            _delayed_read(chat_id, event.id, delay)
+            _delayed_read(chat_id, event.id, delay_secs)
         )
-
-
-# Anti-Typing: intercept outgoing typing actions via Raw handler
-try:
-    from telethon.tl.functions.messages import SetTypingRequest
-
-    @CipherElite.on(events.Raw)
-    async def anti_typing_watcher(update):
-        """Block SetTypingRequest when anti-typing is enabled."""
-        if not ghost_config.get("anti_typing", False):
-            return
-        # Raw events catch updates, not outgoing requests.
-        # Anti-typing works by Telethon not sending typing by default.
-        # This is a placeholder — the real effect is that userbots
-        # don't send typing indicators unless explicitly coded to.
-        pass
-except ImportError:
-    pass
