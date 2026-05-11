@@ -51,6 +51,7 @@ def init(client):
         ".forge glitch <reply> - RGB glitch/chromatic aberration effect",
         ".forge collage <reply1> ... - Merge up to 4 replied images into one sticker",
         ".forge emoji <emoji> - Turn any emoji into a full 512x512 sticker",
+        ".forge text <style> <text> - Create stunning text sticker (styles: fire ice gold neon galaxy matrix sunset ocean dark)",
         ".forge help - Show all forge commands",
     ]
     desc = "🔨 FORGE — Advanced Sticker Creator with effects, overlays & art"
@@ -372,6 +373,188 @@ def fx_emoji_sticker(emoji_char: str) -> Image.Image:
     return canvas
 
 
+# ── Text Sticker Styles ────────────────────────────────────────────────────────
+
+TEXT_STYLES = {
+    "fire":    {"bg": [(20,0,0), (180,40,0), (255,120,0)], "text": (255,240,180), "shadow": (255,60,0),   "outline": (80,0,0)},
+    "ice":     {"bg": [(0,10,40), (0,80,160), (180,230,255)], "text": (220,245,255), "shadow": (0,150,255), "outline": (0,40,100)},
+    "gold":    {"bg": [(10,5,0), (60,40,0), (120,80,0)], "text": (255,220,80), "shadow": (200,120,0),   "outline": (80,50,0)},
+    "neon":    {"bg": [(0,0,0), (5,0,20), (10,0,40)], "text": (0,255,180), "shadow": (0,200,255),       "outline": (0,80,60)},
+    "galaxy":  {"bg": [(5,0,20), (30,0,80), (80,0,140)], "text": (220,180,255), "shadow": (160,80,255), "outline": (30,0,60)},
+    "matrix":  {"bg": [(0,0,0), (0,10,0), (0,20,5)], "text": (0,255,70), "shadow": (0,180,40),         "outline": (0,50,10)},
+    "sunset":  {"bg": [(20,0,30), (180,40,80), (255,140,60)], "text": (255,240,200), "shadow": (255,100,50), "outline": (80,10,20)},
+    "ocean":   {"bg": [(0,10,30), (0,80,120), (0,180,160)], "text": (200,245,255), "shadow": (0,200,220), "outline": (0,40,80)},
+    "dark":    {"bg": [(10,10,10), (30,30,30), (50,50,50)], "text": (255,255,255), "shadow": (150,150,150), "outline": (0,0,0)},
+}
+
+
+def _make_gradient_bg(colors: list, size=(512, 512)) -> Image.Image:
+    """Create a vertical gradient background from a list of (R,G,B) stops."""
+    img = Image.new("RGB", size)
+    pixels = img.load()
+    w, h = size
+    n = len(colors) - 1
+    for y in range(h):
+        t = y / (h - 1)  # 0.0 → 1.0
+        seg = min(int(t * n), n - 1)
+        local_t = (t * n) - seg
+        c0 = colors[seg]
+        c1 = colors[seg + 1]
+        r = int(c0[0] + (c1[0] - c0[0]) * local_t)
+        g = int(c0[1] + (c1[1] - c0[1]) * local_t)
+        b = int(c0[2] + (c1[2] - c0[2]) * local_t)
+        for x in range(w):
+            pixels[x, y] = (r, g, b)
+    return img
+
+
+def _load_best_font(size: int) -> ImageFont.ImageFont:
+    """Try to load a good bold font, fallback to PIL default."""
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+        "/usr/share/fonts/truetype/ubuntu/Ubuntu-Bold.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+        "/usr/share/fonts/truetype/open-sans/OpenSans-Bold.ttf",
+    ]
+    for path in candidates:
+        if Path(path).exists():
+            try:
+                return ImageFont.truetype(path, size)
+            except Exception:
+                continue
+    try:
+        return ImageFont.load_default()
+    except Exception:
+        return None
+
+
+def _wrap_text(text: str, font, draw, max_width: int) -> list:
+    """Word-wrap text to fit within max_width pixels."""
+    words = text.split()
+    lines = []
+    current = ""
+    for word in words:
+        test = (current + " " + word).strip()
+        try:
+            bbox = draw.textbbox((0, 0), test, font=font)
+            w = bbox[2] - bbox[0]
+        except Exception:
+            w = len(test) * 10
+        if w <= max_width or not current:
+            current = test
+        else:
+            lines.append(current)
+            current = word
+    if current:
+        lines.append(current)
+    return lines
+
+
+def fx_text_sticker(text: str, style: str = "dark") -> Image.Image:
+    """Generate a stunning 512x512 text sticker with the given style."""
+    cfg = TEXT_STYLES.get(style.lower(), TEXT_STYLES["dark"])
+
+    # ── Background ──────────────────────────────────────────────────────────
+    bg = _make_gradient_bg(cfg["bg"]).convert("RGBA")
+
+    # ── Add subtle noise/texture overlay ────────────────────────────────────
+    import random as _rnd
+    noise = Image.new("RGBA", (512, 512), (0, 0, 0, 0))
+    noise_draw = ImageDraw.Draw(noise)
+    for _ in range(600):
+        x = _rnd.randint(0, 511)
+        y = _rnd.randint(0, 511)
+        a = _rnd.randint(10, 40)
+        noise_draw.point((x, y), fill=(255, 255, 255, a))
+    bg = Image.alpha_composite(bg, noise)
+
+    # ── Galaxy style: add star dots ──────────────────────────────────────────
+    if style == "galaxy":
+        for _ in range(120):
+            x = _rnd.randint(0, 511)
+            y = _rnd.randint(0, 511)
+            r = _rnd.randint(1, 3)
+            a = _rnd.randint(150, 255)
+            ImageDraw.Draw(bg).ellipse([x-r, y-r, x+r, y+r], fill=(255, 255, 255, a))
+
+    # ── Matrix style: rain columns in background ─────────────────────────────
+    if style == "matrix":
+        mat_font = _load_best_font(14)
+        mat_draw = ImageDraw.Draw(bg)
+        chars = "01アイウエオカキクケコABCDEF"
+        for col in range(0, 512, 18):
+            for row in range(0, 512, 18):
+                ch = _rnd.choice(chars)
+                a = _rnd.randint(20, 80)
+                mat_draw.text((col, row), ch, font=mat_font, fill=(0, 255, 70, a))
+
+    # ── Decorative top/bottom bars ───────────────────────────────────────────
+    bar_color = (*cfg["shadow"][:3], 120)
+    bar_draw = ImageDraw.Draw(bg)
+    bar_draw.rectangle([0, 0, 512, 8], fill=bar_color)
+    bar_draw.rectangle([0, 504, 512, 512], fill=bar_color)
+    bar_draw.rectangle([0, 0, 8, 512], fill=bar_color)
+    bar_draw.rectangle([504, 0, 512, 512], fill=bar_color)
+
+    # ── Determine font size by text length ──────────────────────────────────
+    text_len = len(text)
+    if text_len <= 6:
+        font_size = 110
+    elif text_len <= 12:
+        font_size = 85
+    elif text_len <= 20:
+        font_size = 68
+    elif text_len <= 35:
+        font_size = 52
+    else:
+        font_size = 40
+
+    font = _load_best_font(font_size)
+    draw = ImageDraw.Draw(bg)
+
+    # ── Word wrap ────────────────────────────────────────────────────────────
+    margin = 40
+    lines = _wrap_text(text, font, draw, 512 - margin * 2)
+
+    # ── Calculate total text block height ────────────────────────────────────
+    line_height = font_size + 10
+    total_h = len(lines) * line_height
+    start_y = (512 - total_h) // 2
+
+    # ── Render each line with shadow + outline + main text ──────────────────
+    for i, line in enumerate(lines):
+        try:
+            bbox = draw.textbbox((0, 0), line, font=font)
+            tw = bbox[2] - bbox[0]
+        except Exception:
+            tw = len(line) * (font_size // 2)
+        tx = (512 - tw) // 2
+        ty = start_y + i * line_height
+
+        # Outline (draw text in 8 directions)
+        outline_col = (*cfg["outline"][:3], 255)
+        for ox, oy in [(-2,-2),(2,-2),(-2,2),(2,2),(-3,0),(3,0),(0,-3),(0,3)]:
+            draw.text((tx + ox, ty + oy), line, font=font, fill=outline_col)
+
+        # Shadow (blurred by drawing offset)
+        shadow_col = (*cfg["shadow"][:3], 180)
+        draw.text((tx + 5, ty + 5), line, font=font, fill=shadow_col)
+        draw.text((tx + 4, ty + 4), line, font=font, fill=shadow_col)
+
+        # Main text
+        text_col = (*cfg["text"][:3], 255)
+        draw.text((tx, ty), line, font=font, fill=text_col)
+
+    # ── Add style label watermark in corner ──────────────────────────────────
+    small_font = _load_best_font(18)
+    draw.text((16, 488), f"PARADOX · {style.upper()}", font=small_font,
+              fill=(*cfg["text"][:3], 120))
+
+    return bg
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  COMMAND HANDLERS
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -395,27 +578,57 @@ async def forge_handler(event):
             "  `.forge glow` — Neon glow\n"
             "  `.forge border <color>` — Colored border\n\n"
             "**Effects:**\n"
-            "  `.forge invert` — Invert colors\n"
-            "  `.forge vintage` — Sepia/retro\n"
-            "  `.forge neon` — Cyberpunk neon\n"
-            "  `.forge pop` — Pop-art style\n"
-            "  `.forge glitch` — RGB glitch\n"
-            "  `.forge ghost` — Transparent ghost\n"
-            "  `.forge mosaic` — Pixelated\n\n"
+            "  `.forge invert` `.forge vintage` `.forge neon`\n"
+            "  `.forge pop` `.forge glitch` `.forge ghost` `.forge mosaic`\n\n"
             "**Transform:**\n"
-            "  `.forge mirror` — Horizontal flip\n"
-            "  `.forge flip` — Vertical flip\n"
-            "  `.forge spin <deg>` — Rotate\n\n"
+            "  `.forge mirror` `.forge flip` `.forge spin <deg>`\n\n"
             "**Text Overlays:**\n"
-            "  `.forge caption <text>` — Caption bar\n"
-            "  `.forge stamp <text>` — Bold stamp\n\n"
+            "  `.forge caption <text>` `.forge stamp <text>`\n\n"
+            "**✨ Text Stickers (NO image needed):**\n"
+            "  `.forge text fire Hello World`\n"
+            "  `.forge text ice PARADOX`\n"
+            "  `.forge text gold King`\n"
+            "  `.forge text neon GLOWING`\n"
+            "  `.forge text galaxy Stars`\n"
+            "  `.forge text matrix 01010`\n"
+            "  `.forge text sunset Vibe`\n"
+            "  `.forge text ocean Chill`\n"
+            "  `.forge text dark Clean`\n\n"
             "**Special:**\n"
             "  `.forge collage` — Multi-image grid\n"
             "  `.forge emoji 🔥` — Emoji → sticker\n\n"
-            "**Border colors:** red, blue, green, gold,\n"
-            "white, black, pink, purple, orange, cyan"
+            "**Border colors:** red blue green gold\n"
+            "white black pink purple orange cyan"
         )
         await event.reply(text)
+        return
+
+    # ── .forge text <style> <text> ────────────────────────────────────────────
+    if sub == "text":
+        # Parse: .forge text <style> <the rest is the text>
+        # extra = "fire Hello World" or just "Hello World"
+        style_parts = extra.split(None, 1) if extra else []
+        valid_styles = list(TEXT_STYLES.keys())
+        if style_parts and style_parts[0].lower() in valid_styles:
+            style_name = style_parts[0].lower()
+            user_text = style_parts[1] if len(style_parts) > 1 else "PARADOX"
+        else:
+            style_name = "dark"
+            user_text = extra if extra else "PARADOX"
+        if not user_text.strip():
+            await event.reply(
+                "✍️ **Text Sticker**\n\n"
+                "**Usage:** `.forge text <style> <your text>`\n"
+                "**Example:** `.forge text fire Hello World`\n\n"
+                f"**Styles:** {' · '.join(valid_styles)}"
+            )
+            return
+        msg = await event.reply(f"✨ Forging `{style_name}` text sticker...")
+        try:
+            img = fx_text_sticker(user_text, style_name)
+            await send_sticker(event, img, f"text_{style_name}", msg)
+        except Exception as e:
+            await msg.edit(f"❌ **Error:** `{e}`")
         return
 
     # ── .forge emoji <emoji> ──────────────────────────────────────────────────
