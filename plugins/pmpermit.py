@@ -199,13 +199,28 @@ class PersonalAssistant:
         """Generates a dynamic glassmorphism welcome card with the user's PFP, name, and ID."""
         cfg = self.data["config"]
         owner_name = "PARADOX"
-
-        first = sender.first_name or ""
-        last = sender.last_name or ""
-        user_name = f"{first} {last}".strip() or "Unknown"
         user_id = str(sender.id)
 
-        # Download user profile pic
+        # ── Get REAL name from Telegram (bypass contact/saved names) ──
+        display_name = None
+        username = None
+        try:
+            from telethon.tl.functions.users import GetUsersRequest
+            from telethon.tl.types import InputUser
+            full = await event.client(GetUsersRequest(id=[sender.id]))
+            if full:
+                real_user = full[0]
+                first = real_user.first_name or ""
+                last = real_user.last_name or ""
+                display_name = f"{first} {last}".strip() or None
+                username = f"@{real_user.username}" if real_user.username else None
+        except Exception:
+            first = sender.first_name or ""
+            last = sender.last_name or ""
+            display_name = f"{first} {last}".strip() or None
+            username = f"@{sender.username}" if sender.username else None
+
+        # ── Download profile pic OR use PM permit pic ──────────────
         pfp_img = None
         pfp_path = None
         try:
@@ -215,7 +230,22 @@ class PersonalAssistant:
         except Exception:
             pass
 
-        # ── Card setup ─────────────────────────────────────────────
+        # If no profile pic → use PM permit pic
+        if not pfp_img:
+            try:
+                permit_pic = cfg.get("pmpermit_pic", "")
+                if permit_pic and os.path.exists(str(permit_pic)):
+                    pfp_img = Image.open(permit_pic).convert("RGBA").resize((160, 160))
+                elif permit_pic and permit_pic.startswith("http"):
+                    import requests
+                    r = requests.get(permit_pic, timeout=15)
+                    if r.status_code == 200:
+                        from io import BytesIO
+                        pfp_img = Image.open(BytesIO(r.content)).convert("RGBA").resize((160, 160))
+            except Exception:
+                pass
+
+        # ── Card dimensions ────────────────────────────────────────
         W, H = 700, 700
 
         # ── Background gradient (deep purple/blue) ─────────────────
@@ -255,32 +285,44 @@ class PersonalAssistant:
 
         draw = ImageDraw.Draw(bg)
 
-        # ── Load fonts (Unicode — supports ALL languages) ──────────
-        unicode_font_path = os.path.join(TEMP_DIR, "ArialUnicodeMS.ttf")
-        fallback_font_path = os.path.join("cipher_assets", "bold.ttf")
+        # ── Load fonts (multi-source Unicode for ALL languages) ────
+        unicode_font_path = os.path.join(TEMP_DIR, "NotoSans_Universal.ttf")
 
-        # Auto-download Unicode font if not cached
+        # Try multiple font sources for maximum language coverage
         if not os.path.exists(unicode_font_path):
+            font_urls = [
+                "https://github.com/TgCatUB/CatUserbot-Resources/raw/master/Resources/Spotify/ArialUnicodeMS.ttf",
+                "https://github.com/googlefonts/noto-fonts/raw/main/hinted/ttf/NotoSans/NotoSans-Regular.ttf",
+                "https://github.com/ArtifexSoftware/mupdf/raw/refs/heads/master/resources/fonts/droid/DroidSansFallbackFull.ttf",
+            ]
             try:
                 import requests
-                font_url = "https://github.com/ArtifexSoftware/mupdf/raw/refs/heads/master/resources/fonts/droid/DroidSansFallbackFull.ttf"
-                resp = requests.get(font_url, timeout=30)
-                if resp.status_code == 200:
-                    with open(unicode_font_path, "wb") as f:
-                        f.write(resp.content)
+                for url in font_urls:
+                    try:
+                        resp = requests.get(url, timeout=30)
+                        if resp.status_code == 200 and len(resp.content) > 50000:
+                            with open(unicode_font_path, "wb") as f:
+                                f.write(resp.content)
+                            break
+                    except Exception:
+                        continue
             except Exception:
                 pass
 
-        # Pick the best available font
+        fallback_font_path = os.path.join("cipher_assets", "bold.ttf")
+
+        # Pick font
+        active_font_path = None
+        if os.path.exists(unicode_font_path):
+            active_font_path = unicode_font_path
+        elif os.path.exists(fallback_font_path):
+            active_font_path = fallback_font_path
+
         try:
-            if os.path.exists(unicode_font_path):
-                welcome_font = ImageFont.truetype(unicode_font_path, 28)
-                name_font = ImageFont.truetype(unicode_font_path, 36)
-                info_font = ImageFont.truetype(unicode_font_path, 24)
-            elif os.path.exists(fallback_font_path):
-                welcome_font = ImageFont.truetype(fallback_font_path, 28)
-                name_font = ImageFont.truetype(fallback_font_path, 36)
-                info_font = ImageFont.truetype(fallback_font_path, 24)
+            if active_font_path:
+                welcome_font = ImageFont.truetype(active_font_path, 28)
+                name_font = ImageFont.truetype(active_font_path, 36)
+                info_font = ImageFont.truetype(active_font_path, 24)
             else:
                 welcome_font = ImageFont.load_default()
                 name_font = ImageFont.load_default()
@@ -289,6 +331,28 @@ class PersonalAssistant:
             welcome_font = ImageFont.load_default()
             name_font = ImageFont.load_default()
             info_font = ImageFont.load_default()
+
+        # ── Check if font can render the name ──────────────────────
+        def can_render(text, font):
+            """Check if font can actually render all chars (no empty/missing glyphs)."""
+            try:
+                for ch in text:
+                    if ch.isspace():
+                        continue
+                    bbox = font.getbbox(ch)
+                    if not bbox or (bbox[2] - bbox[0]) <= 0:
+                        return False
+                return True
+            except Exception:
+                return False
+
+        # Decide what to show for the name line
+        show_name = None
+        if display_name and can_render(display_name, info_font):
+            show_name = display_name
+        elif username:
+            show_name = username
+        # If neither → name section is skipped entirely
 
         center_x = W // 2
 
@@ -308,18 +372,19 @@ class PersonalAssistant:
                 outline=(255, 255, 255, 200), width=3
             )
         else:
+            # Placeholder circle with initial
             draw.ellipse(
                 [pfp_x, pfp_y, pfp_x + pfp_size, pfp_y + pfp_size],
                 fill=(100, 90, 170), outline=(255, 255, 255, 200), width=3
             )
-            # Draw initial letter
-            initial = user_name[0].upper()
-            try:
-                ibbox = draw.textbbox((0, 0), initial, font=name_font)
-                iw = ibbox[2] - ibbox[0]
-            except Exception:
-                iw = 20
-            draw.text((center_x - iw // 2, pfp_y + 55), initial, font=name_font, fill=(255, 255, 255))
+            if show_name:
+                initial = show_name[0].upper() if show_name[0] != "@" and can_render(show_name[0], name_font) else "?"
+                try:
+                    ibbox = draw.textbbox((0, 0), initial, font=name_font)
+                    iw = ibbox[2] - ibbox[0]
+                except Exception:
+                    iw = 20
+                draw.text((center_x - iw // 2, pfp_y + 55), initial, font=name_font, fill=(255, 255, 255))
 
         # ── "Welcome to" text ──────────────────────────────────────
         wt = "Welcome to"
@@ -338,14 +403,17 @@ class PersonalAssistant:
             nw = len(owner_name) * 20
         draw.text((center_x - nw // 2, pfp_y + pfp_size + 70), owner_name, font=name_font, fill=(255, 255, 255))
 
-        # ── Name : user_name ───────────────────────────────────────
-        name_line = f"Name : {user_name}"
-        try:
-            nlbbox = draw.textbbox((0, 0), name_line, font=info_font)
-            nlw = nlbbox[2] - nlbbox[0]
-        except Exception:
-            nlw = len(name_line) * 12
-        draw.text((center_x - nlw // 2, pfp_y + pfp_size + 130), name_line, font=info_font, fill=(210, 210, 240))
+        # ── Name / Username (or skip if neither available) ─────────
+        y_offset = pfp_y + pfp_size + 130
+        if show_name:
+            name_line = f"Name : {show_name}"
+            try:
+                nlbbox = draw.textbbox((0, 0), name_line, font=info_font)
+                nlw = nlbbox[2] - nlbbox[0]
+            except Exception:
+                nlw = len(name_line) * 12
+            draw.text((center_x - nlw // 2, y_offset), name_line, font=info_font, fill=(210, 210, 240))
+            y_offset += 40
 
         # ── ID : user_id ───────────────────────────────────────────
         id_line = f"ID : {user_id}"
@@ -354,7 +422,7 @@ class PersonalAssistant:
             ilw = ilbbox[2] - ilbbox[0]
         except Exception:
             ilw = len(id_line) * 12
-        draw.text((center_x - ilw // 2, pfp_y + pfp_size + 170), id_line, font=info_font, fill=(210, 210, 240))
+        draw.text((center_x - ilw // 2, y_offset), id_line, font=info_font, fill=(210, 210, 240))
 
         # ── Save ───────────────────────────────────────────────────
         out_path = os.path.join(TEMP_DIR, f"paradox_welcome_{user_id}.png")
