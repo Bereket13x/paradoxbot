@@ -8,6 +8,7 @@ import asyncio
 import os
 import ssl
 import urllib.request
+import json
 from datetime import datetime, timedelta
 from PIL import Image, ImageDraw, ImageFont
 from telethon import functions, events
@@ -32,6 +33,7 @@ FONT_URL = "https://github.com/google/fonts/raw/main/apache/roboto/static/Roboto
 FONT_PATH = os.path.join(ASSETS_DIR, "bold.ttf")
 PFP_PATH = os.path.join(ASSETS_DIR, "current_pfp.jpg")
 BG_PATH = os.path.join(ASSETS_DIR, "bg.jpg")
+STATE_FILE = os.path.join(ASSETS_DIR, "autoprofile_state.json")
 
 # --- Global State & Animations ---
 RUNNING_TASKS = {
@@ -40,6 +42,25 @@ RUNNING_TASKS = {
     "digitalpfp": {"running": False},
     "forgepfp": {"running": False, "frame": 0, "username": ""}
 }
+
+def save_state():
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump(RUNNING_TASKS, f)
+    except Exception:
+        pass
+
+def load_state():
+    global RUNNING_TASKS
+    try:
+        if os.path.exists(STATE_FILE):
+            with open(STATE_FILE, "r") as f:
+                saved = json.load(f)
+                for k, v in saved.items():
+                    if k in RUNNING_TASKS:
+                        RUNNING_TASKS[k].update(v)
+    except Exception:
+        pass
 
 ANIMATIONS = {
     "premium": ["⭐", "🌟", "✨", "⚡", "🔥"],
@@ -287,7 +308,23 @@ async def loop_digitalpfp(client):
             pfp_file = generate_time_pfp()
             if os.path.exists(pfp_file):
                 file = await client.upload_file(pfp_file)
-                await client(functions.photos.UploadProfilePhotoRequest(file=file))
+                res = await client(functions.photos.UploadProfilePhotoRequest(file=file))
+                
+                # Delete previous auto-generated PFP
+                last_id = RUNNING_TASKS["digitalpfp"].get("last_photo_id")
+                last_hash = RUNNING_TASKS["digitalpfp"].get("last_photo_hash")
+                if last_id and last_hash:
+                    try:
+                        from telethon.tl.types import InputPhoto
+                        from telethon.tl.functions.photos import DeletePhotosRequest
+                        await client(DeletePhotosRequest(id=[InputPhoto(id=last_id, access_hash=last_hash, file_reference=b'')]))
+                    except Exception:
+                        pass
+                
+                RUNNING_TASKS["digitalpfp"]["last_photo_id"] = getattr(res.photo, "id", None)
+                RUNNING_TASKS["digitalpfp"]["last_photo_hash"] = getattr(res.photo, "access_hash", None)
+                save_state()
+                
                 os.remove(pfp_file)
             else:
                 await notify_user(client, "⚠️ PFP Gen Error")
@@ -322,7 +359,23 @@ async def loop_forgepfp(client):
             pfp_file = generate_forge_pfp(display_name, tg_username, frame)
             if os.path.exists(pfp_file):
                 file = await client.upload_file(pfp_file)
-                await client(functions.photos.UploadProfilePhotoRequest(file=file))
+                res = await client(functions.photos.UploadProfilePhotoRequest(file=file))
+                
+                # Delete previous auto-generated PFP
+                last_id = RUNNING_TASKS["forgepfp"].get("last_photo_id")
+                last_hash = RUNNING_TASKS["forgepfp"].get("last_photo_hash")
+                if last_id and last_hash:
+                    try:
+                        from telethon.tl.types import InputPhoto
+                        from telethon.tl.functions.photos import DeletePhotosRequest
+                        await client(DeletePhotosRequest(id=[InputPhoto(id=last_id, access_hash=last_hash, file_reference=b'')]))
+                    except Exception:
+                        pass
+                        
+                RUNNING_TASKS["forgepfp"]["last_photo_id"] = getattr(res.photo, "id", None)
+                RUNNING_TASKS["forgepfp"]["last_photo_hash"] = getattr(res.photo, "access_hash", None)
+                save_state()
+                
                 os.remove(pfp_file)
                 RUNNING_TASKS["forgepfp"]["frame"] += 1
             else:
@@ -350,6 +403,16 @@ def init(client_instance):
     add_handler("autoprofile", commands, description)
 
 async def register_commands():
+    load_state()
+    if RUNNING_TASKS["autoname"]["running"]:
+        CipherElite.loop.create_task(loop_autoname(CipherElite))
+    if RUNNING_TASKS["autobio"]["running"]:
+        CipherElite.loop.create_task(loop_autobio(CipherElite))
+    if RUNNING_TASKS["digitalpfp"]["running"]:
+        CipherElite.loop.create_task(loop_digitalpfp(CipherElite))
+    if RUNNING_TASKS["forgepfp"]["running"]:
+        CipherElite.loop.create_task(loop_forgepfp(CipherElite))
+
     @CipherElite.on(events.NewMessage(pattern=r"^\.nstyles$"))
     @rishabh()
     async def show_styles(event):
@@ -370,6 +433,7 @@ async def register_commands():
         RUNNING_TASKS["autoname"]["style"] = style
         RUNNING_TASKS["autoname"]["text"] = text
         RUNNING_TASKS["autoname"]["frame"] = 0
+        save_state()
         
         if not RUNNING_TASKS["autoname"]["running"]:
             RUNNING_TASKS["autoname"]["running"] = True
@@ -390,6 +454,7 @@ async def register_commands():
         RUNNING_TASKS["autobio"]["style"] = style
         RUNNING_TASKS["autobio"]["text"] = text
         RUNNING_TASKS["autobio"]["frame"] = 0
+        save_state()
         
         if not RUNNING_TASKS["autobio"]["running"]:
             RUNNING_TASKS["autobio"]["running"] = True
@@ -410,8 +475,23 @@ async def register_commands():
             test_path = generate_time_pfp()
             if not os.path.exists(test_path): return await status.edit("❌ Gen Error")
             file = await event.client.upload_file(test_path)
-            await event.client(functions.photos.UploadProfilePhotoRequest(file=file))
+            res = await event.client(functions.photos.UploadProfilePhotoRequest(file=file))
+            
+            # Delete previous auto-generated PFP
+            last_id = RUNNING_TASKS["digitalpfp"].get("last_photo_id")
+            last_hash = RUNNING_TASKS["digitalpfp"].get("last_photo_hash")
+            if last_id and last_hash:
+                try:
+                    from telethon.tl.types import InputPhoto
+                    from telethon.tl.functions.photos import DeletePhotosRequest
+                    await event.client(DeletePhotosRequest(id=[InputPhoto(id=last_id, access_hash=last_hash, file_reference=b'')]))
+                except Exception:
+                    pass
+            
+            RUNNING_TASKS["digitalpfp"]["last_photo_id"] = getattr(res.photo, "id", None)
+            RUNNING_TASKS["digitalpfp"]["last_photo_hash"] = getattr(res.photo, "access_hash", None)
             RUNNING_TASKS["digitalpfp"]["running"] = True
+            save_state()
             CipherElite.loop.create_task(loop_digitalpfp(event.client))
             await status.edit("🎭 **Digital PFP Started**\nIf your image is missing, a backup Cyberpunk image was used.")
         except FloodWaitError as e:
@@ -427,6 +507,7 @@ async def register_commands():
         
         try:
             RUNNING_TASKS["forgepfp"]["running"] = True
+            save_state()
             CipherElite.loop.create_task(loop_forgepfp(event.client))
             await status.edit("🎭 **Forge PFP Started!**\nAutomatically changing profile picture styles every minute.")
         except FloodWaitError as e:
@@ -440,6 +521,7 @@ async def register_commands():
         task = event.pattern_match.group(1).lower().strip()
         if task in RUNNING_TASKS:
             RUNNING_TASKS[task]["running"] = False
+            save_state()
             await event.reply(f"🛑 Stopped {task}")
         else:
             await event.reply("❌ Invalid task")
