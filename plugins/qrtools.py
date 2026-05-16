@@ -18,13 +18,13 @@ from telethon import events
 import qrcode
 from qrcode.image.styledpil import StyledPilImage
 from qrcode.image.styles.colormasks import RadialGradiantColorMask, SolidFillColorMask
-from pyzbar.pyzbar import decode
+# pyzbar removed temporarily for debugging
 
 from utils.utils import CipherElite
 from utils.decorators import rishabh
 from plugins.bot import add_handler
 
-TMP_DIR = Path("/tmp/qrtools")
+TMP_DIR = Path(__file__).parent.parent / "scratch" / "qrtools"
 TMP_DIR.mkdir(parents=True, exist_ok=True)
 
 # ── Plugin Registration ────────────────────────────────────────────────────────
@@ -99,7 +99,8 @@ async def read_qr(event) -> str:
     try:
         data = await event.client.download_media(reply, bytes)
         img = Image.open(BytesIO(data))
-        decoded = decode(img)
+        # decoded = decode(img)
+        decoded = None # Temp fix
         
         if not decoded:
             return "❌ No QR code found in the image."
