@@ -52,7 +52,8 @@ class PersonalAssistant:
             "users": {},
             "approved_users": [],
             "user_states": {},
-            "warnings": {},  # Fix: was missing, caused KeyError on first new PM
+            "warnings": {},
+            "warned_users": {},  # {uid: {"limit": 5, "count": 0, "blocked_until": null}}
         }
         self.ai_sessions = {}
         self.client = None
@@ -155,7 +156,7 @@ class PersonalAssistant:
                     on_disk = json.load(f)
                 for k, v in on_disk.items():
                     # Force these to ALWAYS be dictionaries
-                    if k in ["users", "warnings", "user_states"]:
+                    if k in ["users", "warnings", "user_states", "warned_users"]:
                         self.data[k] = v if isinstance(v, dict) else {}
                     # Force approved users to ALWAYS be a list
                     elif k == "approved_users":
@@ -418,6 +419,77 @@ class PersonalAssistant:
 
         msg_text = event.message.text or ""
 
+        # ── 0) Check if user is warned ────────────────────────────────────────
+        warn_data = self.data.get("warned_users", {}).get(uid)
+        if warn_data:
+            blocked_until = warn_data.get("blocked_until")
+
+            # Check if user is currently blocked
+            if blocked_until:
+                block_time = datetime.fromisoformat(blocked_until)
+                now = datetime.now()
+                if now < block_time:
+                    remaining = block_time - now
+                    mins = int(remaining.total_seconds() // 60)
+                    secs = int(remaining.total_seconds() % 60)
+                    await event.reply(
+                        f"🚫 │ **Access Temporarily Restricted**\n"
+                        f"───────────────────────────\n"
+                        f"⏳ **Try again in:** `{mins}m {secs}s`\n"
+                        f"───────────────────────────"
+                    )
+                    return
+                else:
+                    # Block expired — reset warnings
+                    warn_data["count"] = 0
+                    warn_data["blocked_until"] = None
+                    self._save()
+
+            # Increment and check limit
+            limit = warn_data.get("limit", 5)
+            warn_data["count"] = warn_data.get("count", 0) + 1
+            count = warn_data["count"]
+            remaining = limit - count
+
+            if remaining <= 0:
+                # Limit reached — block for 30 minutes
+                from datetime import timedelta
+                warn_data["blocked_until"] = (datetime.now() + timedelta(minutes=30)).isoformat()
+                warn_data["count"] = 0
+                self._save()
+
+                await event.reply(
+                    f"🔴 │ **Message Limit Reached**\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                    f"⚠️ You've used all **{limit}** messages.\n"
+                    f"🔒 Inbox restricted for **30 minutes**.\n\n"
+                    f"_The owner has been notified. Your access will\n"
+                    f"automatically restore after the cooldown._\n\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                )
+
+                # Notify owner
+                first = sender.first_name or "Unknown"
+                await self.send_notification(event, {"name": first, "username": sender.username, "id": uid}, f"[WARN LIMIT HIT — {limit} messages]")
+                return
+            else:
+                # Show warning with remaining count
+                self._save()
+                bar_filled = "█" * count
+                bar_empty = "░" * remaining
+                await event.reply(
+                    f"⚠️ │ **Warning {count}/{limit}**\n"
+                    f"───────────────────────────\n\n"
+                    f"📩 **Messages remaining:** `{remaining}`\n"
+                    f"[{bar_filled}{bar_empty}]\n\n"
+                    f"_The owner is unavailable. Please wait\n"
+                    f"for them to respond or approve you._\n\n"
+                    f"💡 **Tip:** Start your message with `.` to\n"
+                    f"send directly without this warning.\n"
+                    f"───────────────────────────"
+                )
+                return  # Don't pass to AI
+
         # ── 1) First contact ──────────────────────────────────────────────────
         if uid not in self.data["users"]:
             self.data["users"][uid] = {
@@ -479,6 +551,9 @@ def init(client):
         ".togglepermitpic     — Enable/disable the picture",
         ".pmpermit on|off     — Enable/disable PM permit globally",
         ".pmstatus            — Check PM Permit AI status & debugging",
+        ".pmreset             — Reset all users (everyone gets re-introduced)",
+        ".pmwarn <n>          — Set message limit for user (use in PM chat)",
+        ".pmunwarn            — Remove warn from user (use in PM chat)",
     ]
     add_handler("pmpermit", commands, "Personal Assistant PM Manager")
 
@@ -590,6 +665,74 @@ def init(client):
 
         state = "ON ✅" if cfg.get("pmpermit_enabled", True) else "OFF 🚫"
         await event.reply(f"PM permit is currently {state}\nUsage: `.pmpermit on` or `.pmpermit off`")
+
+
+    @CipherElite.on(events.NewMessage(outgoing=True, pattern=r"\.pmreset$"))
+    @rishabh()
+    async def _pmreset(event):
+        total_users = len(assistant.data.get("users", {}))
+
+        # Only wipe user tracking — everyone gets the welcome card again
+        assistant.data["users"] = {}
+        assistant.data["user_states"] = {}
+        assistant._save()
+
+        await event.reply(
+            "🔄 **PM Permit Reset!**\n\n"
+            f"🗑 **Cleared:** `{total_users}` user records\n"
+            "✅ Approved users are **still approved**\n\n"
+            "Everyone else will get a fresh welcome card + introduction on their next message."
+        )
+
+
+    @CipherElite.on(events.NewMessage(outgoing=True, pattern=r"\.pmwarn(?:\s+(\d+))?$"))
+    @rishabh()
+    async def _pmwarn(event):
+        if not event.is_private:
+            return await event.reply("❌ Use this in a PM chat.")
+
+        limit_arg = event.pattern_match.group(1)
+        if not limit_arg:
+            return await event.reply("❌ **Usage:** `.pmwarn 5` — limits user to 5 messages before cooldown.")
+
+        uid = str(event.chat_id)
+        limit = int(limit_arg)
+        limit = max(1, min(limit, 50))  # Clamp between 1-50
+
+        assistant.data.setdefault("warned_users", {})
+        assistant.data["warned_users"][uid] = {
+            "limit": limit,
+            "count": 0,
+            "blocked_until": None
+        }
+        # Clear AI session so it stops responding
+        assistant.ai_sessions.pop(uid, None)
+        assistant._save()
+
+        await event.reply(
+            f"⚠️ **Warn Activated**\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            f"📩 **Message limit:** `{limit}`\n"
+            f"🔒 **Cooldown:** `30 minutes` on limit\n"
+            f"🤖 **AI:** Disabled for this user\n\n"
+            f"_After {limit} messages, they'll be blocked for 30 min._"
+        )
+
+    @CipherElite.on(events.NewMessage(outgoing=True, pattern=r"\.pmunwarn$"))
+    @rishabh()
+    async def _pmunwarn(event):
+        if not event.is_private:
+            return await event.reply("❌ Use this in a PM chat.")
+
+        uid = str(event.chat_id)
+        warned = assistant.data.get("warned_users", {})
+
+        if uid in warned:
+            del warned[uid]
+            assistant._save()
+            await event.reply("✅ **Warn removed.** AI is back on for this user.")
+        else:
+            await event.reply("ℹ️ This user has no active warn.")
 
 
     print(
