@@ -272,7 +272,7 @@ async def loop_autoname(client):
             await asyncio.sleep(e.seconds)
         except Exception:
             pass
-        await asyncio.sleep(60)
+        await asyncio.sleep(300)
 
 async def loop_autobio(client):
     while RUNNING_TASKS["autobio"]["running"]:
@@ -300,7 +300,7 @@ async def loop_autobio(client):
             await asyncio.sleep(e.seconds)
         except Exception:
             pass
-        await asyncio.sleep(60)
+        await asyncio.sleep(300)
 
 async def loop_digitalpfp(client):
     while RUNNING_TASKS["digitalpfp"]["running"]:
@@ -329,12 +329,19 @@ async def loop_digitalpfp(client):
             else:
                 await notify_user(client, "⚠️ PFP Gen Error")
         except FloodWaitError as e:
-            await notify_user(client, f"🛑 PFP Stopped: FloodWait {e.seconds}s")
-            RUNNING_TASKS["digitalpfp"]["running"] = False
-            break
+            wait_mins = round(e.seconds / 60)
+            await notify_user(client, f"⏳ **Digital PFP FloodWait!**\nTelegram blocked profile changes for **{wait_mins} minutes** ({e.seconds}s).\nAuto-resuming after the wait...")
+            await asyncio.sleep(e.seconds + 10)
+            continue
+        except RPCError as e:
+            await notify_user(client, f"⚠️ **Digital PFP RPC Error:** `{e}`\nRetrying in 3 minutes...")
+            await asyncio.sleep(180)
+            continue
         except Exception as e:
-            await notify_user(client, f"❌ PFP Error: {str(e)}")
-        await asyncio.sleep(60)
+            await notify_user(client, f"❌ **PFP Error:** `{str(e)}`\nRetrying in 3 minutes...")
+            await asyncio.sleep(180)
+            continue
+        await asyncio.sleep(180)
 
 async def loop_forgepfp(client):
     while RUNNING_TASKS["forgepfp"]["running"]:
@@ -381,12 +388,19 @@ async def loop_forgepfp(client):
             else:
                 await notify_user(client, "⚠️ Forge PFP Gen Error")
         except FloodWaitError as e:
-            await notify_user(client, f"🛑 Forge PFP Stopped: FloodWait {e.seconds}s")
-            RUNNING_TASKS["forgepfp"]["running"] = False
-            break
+            wait_mins = round(e.seconds / 60)
+            await notify_user(client, f"⏳ **Forge PFP FloodWait!**\nTelegram blocked profile changes for **{wait_mins} minutes** ({e.seconds}s).\nAuto-resuming after the wait...")
+            await asyncio.sleep(e.seconds + 10)  # Wait it out, then resume
+            continue
+        except RPCError as e:
+            await notify_user(client, f"⚠️ **Forge PFP RPC Error:** `{e}`\nRetrying in 3 minutes...")
+            await asyncio.sleep(180)
+            continue
         except Exception as e:
-            await notify_user(client, f"❌ Forge PFP Error: {str(e)}")
-        await asyncio.sleep(60)
+            await notify_user(client, f"❌ **Forge PFP Error:** `{str(e)}`\nRetrying in 3 minutes...")
+            await asyncio.sleep(180)
+            continue
+        await asyncio.sleep(180)
 
 # --- Plugin Init ---
 
