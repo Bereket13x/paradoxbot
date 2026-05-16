@@ -1,8 +1,11 @@
 import asyncio
 import random
+import time
 
 from telethon import events
 from telethon.errors.rpcerrorlist import MessageNotModifiedError
+from telethon.tl.functions.users import GetUsersRequest
+from telethon.tl.types import UserStatusOnline, UserStatusRecently
 
 from utils.utils import CipherElite
 from utils.decorators import rishabh
@@ -16,7 +19,8 @@ def init(client):
         ".matrix [sec]   - Matrix rain in text",
         ".hearts <text>  - Bubble hearts around your text",
         ".countdown <n>  - Count down from n to 0",
-        ".wave <text>    - Text wave effect"
+        ".wave <text>    - Text wave effect",
+        ".scan <@user/reply> - Hacker-style identity scan"
     ]
     add_handler("animation", commands, "Animation Plugin")
 
@@ -150,3 +154,122 @@ async def wave(event):
         pos += direction
         await asyncio.sleep(0.1)
     await safe_edit(msg, text)
+
+
+@CipherElite.on(events.NewMessage(pattern=r"^\.scan(?:\s+(.+))?$", outgoing=True))
+@rishabh()
+async def scan_user(event):
+    target = (event.pattern_match.group(1) or "").strip()
+
+    if not target and not event.is_reply:
+        return await event.reply("❌ **Usage:** `.scan @username` or reply to someone.")
+
+    # Resolve the target user
+    try:
+        if event.is_reply and not target:
+            reply = await event.get_reply_message()
+            uid = reply.sender_id
+        else:
+            uid = target.lstrip("@")
+        result = await event.client(GetUsersRequest(id=[uid]))
+        if not result:
+            return await event.reply("❌ **Target not found.**")
+        user = result[0]
+    except Exception as e:
+        return await event.reply(f"❌ **Error:** `{e}`")
+
+    # Prepare user data
+    first = user.first_name or ""
+    last = user.last_name or ""
+    real_name = f"{first} {last}".strip() or "CLASSIFIED"
+    username = f"@{user.username}" if user.username else "HIDDEN"
+    user_id = user.id
+    is_bot = "YES ⚠️" if user.bot else "NO"
+    is_premium = "YES ⭐" if getattr(user, 'premium', False) else "NO"
+    is_verified = "YES ✅" if getattr(user, 'verified', False) else "NO"
+    is_scam = "YES 🚨" if getattr(user, 'scam', False) else "NO"
+    is_fake = "YES 💀" if getattr(user, 'fake', False) else "NO"
+    is_restricted = "YES 🔒" if getattr(user, 'restricted', False) else "NO"
+
+    status = user.status
+    if isinstance(status, UserStatusOnline):
+        status_str = "🟢 ONLINE NOW"
+    elif isinstance(status, UserStatusRecently):
+        status_str = "🟡 Recently Online"
+    else:
+        status_str = "🔴 Offline"
+
+    # Threat level based on flags
+    threat = 0
+    if user.bot: threat += 2
+    if getattr(user, 'scam', False): threat += 5
+    if getattr(user, 'fake', False): threat += 5
+    if getattr(user, 'restricted', False): threat += 3
+    if getattr(user, 'premium', False): threat -= 1
+    if getattr(user, 'verified', False): threat -= 2
+    threat = max(0, min(threat, 10))
+    threat_bar = "█" * threat + "░" * (10 - threat)
+    if threat >= 7:
+        threat_label = "🔴 CRITICAL"
+    elif threat >= 4:
+        threat_label = "🟡 MODERATE"
+    elif threat >= 1:
+        threat_label = "🟢 LOW"
+    else:
+        threat_label = "⚪ CLEAN"
+
+    msg = await event.edit("⏳")
+
+    # ── PHASE 1: Boot sequence ──────────────────────────────────────────
+    frames_boot = [
+        "```\n⟨ PARADOX SYSTEM ⟩\n\n[          ] 0%\n\nBooting scanner...\n```",
+        "```\n⟨ PARADOX SYSTEM ⟩\n\n[██        ] 10%\n\nInitializing modules...\n```",
+        "```\n⟨ PARADOX SYSTEM ⟩\n\n[████      ] 25%\n\nLoading target database...\n```",
+    ]
+    for f in frames_boot:
+        await safe_edit(msg, f)
+        await asyncio.sleep(0.5)
+
+    # ── PHASE 2: Target lock ────────────────────────────────────────────
+    frames_lock = [
+        f"```\n⟨ PARADOX SYSTEM ⟩\n\n[██████    ] 40%\n\n🔎 Locating target: {username}\n   Searching Telegram servers...\n```",
+        f"```\n⟨ PARADOX SYSTEM ⟩\n\n[███████   ] 55%\n\n🎯 TARGET LOCKED\n   ID: {user_id}\n   Extracting identity...\n```",
+    ]
+    for f in frames_lock:
+        await safe_edit(msg, f)
+        await asyncio.sleep(0.6)
+
+    # ── PHASE 3: Data extraction ────────────────────────────────────────
+    frames_extract = [
+        f"```\n⟨ PARADOX SYSTEM ⟩\n\n[████████  ] 70%\n\n📡 Intercepting data packets...\n   ▓▓▓░░░░░ Decoding...\n```",
+        f"```\n⟨ PARADOX SYSTEM ⟩\n\n[█████████ ] 85%\n\n🔓 Decrypting identity matrix...\n   ▓▓▓▓▓▓░░ Almost there...\n```",
+        f"```\n⟨ PARADOX SYSTEM ⟩\n\n[██████████] 100%\n\n✅ SCAN COMPLETE\n   Generating report...\n```",
+    ]
+    for f in frames_extract:
+        await safe_edit(msg, f)
+        await asyncio.sleep(0.5)
+
+    await asyncio.sleep(0.3)
+
+    # ── PHASE 4: Final report ───────────────────────────────────────────
+    report = (
+        f"⟨ **PARADOX SCANNER** ⟩\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"✅ **SCAN COMPLETE** — Target Acquired\n\n"
+        f"📛 **Real Name:** `{real_name}`\n"
+        f"🆔 **Username:** `{username}`\n"
+        f"🔢 **User ID:** `{user_id}`\n"
+        f"📡 **Status:** {status_str}\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🤖 **Bot:** `{is_bot}`\n"
+        f"⭐ **Premium:** `{is_premium}`\n"
+        f"✅ **Verified:** `{is_verified}`\n"
+        f"🔒 **Restricted:** `{is_restricted}`\n"
+        f"⚠️ **Scam:** `{is_scam}`\n"
+        f"💀 **Fake:** `{is_fake}`\n\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🛡 **Threat Level:** [{threat_bar}] {threat_label}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"⟨ PARADOX v2.0 ⟩"
+    )
+    await safe_edit(msg, report)
