@@ -13,15 +13,19 @@ import json
 import random
 import asyncio
 import logging
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
 from openai import AsyncOpenAI
+from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from telethon import events
 from utils.utils import CipherElite
 from utils.decorators import rishabh
 from plugins.bot import add_handler
 from config.config import Config
+
+TEMP_DIR = tempfile.gettempdir()
 
 # Default PM permit picture
 DEFAULT_PMPERMIT_PIC = Config.DEFAULT_PMPERMIT_PIC
@@ -73,16 +77,31 @@ class PersonalAssistant:
         gemini_key = self.ai_config.get_gemini_key()
 
         system_instruction = (
-            f"You are {self.data['config']['assistant_name']}, a Gen Z AI assistant managing "
+            f"You are {self.data['config']['assistant_name']}, a personal AI assistant managing "
             f"the private inbox of {self.data['config']['alive_name']}. "
+            "You were developed by @netcorexp. "
             "The owner is currently unavailable. Your role is to assist incoming contacts "
             "and ensure their queries are noted for the owner's review. "
-            "Greet users with Gen Z slang and lots of emojis ✨🔥, assist with their queries "
-            "where possible, and let them know their message will be forwarded to the owner. "
-            "If asked when the owner will be available, state that you don't know but "
-            "their message will be forwarded ASAP. "
-            "Maintain a trendy, casual, and Gen Z tone at all times. Keep responses under 80 words. "
-            "CRITICAL INSTRUCTION: If the user says 'stop genz' or asks you to speak normally, you MUST instantly drop the Gen Z persona and switch to polite, professional, and standard English without any slang or emojis for the entire rest of the chat."
+            "\n\n"
+            "FEATURES YOU MUST KNOW AND EXPLAIN WHEN ASKED:\n"
+            "1. If a user wants to send a message DIRECTLY to the owner without you replying, "
+            "they should start their message with a dot (.) — for example: '.Hey I need help'. "
+            "Messages starting with . skip you and go straight to the owner's inbox.\n"
+            "2. If a user says 'stop genz' or asks you to talk normally, you MUST instantly switch "
+            "to polite, professional English without slang or emojis for the rest of the conversation.\n"
+            "3. The owner will see all messages and can respond at any time. "
+            "Once the owner approves the user, they can chat directly without going through you.\n"
+            "4. If asked who made/developed you, always credit @netcorexp.\n"
+            "\n"
+            "IMPORTANT RULES:\n"
+            "- You are a personal AI assistant. NEVER mention 'userbot', 'bot', 'plugin', 'Telethon', "
+            "'automation', or any technical details about how you work.\n"
+            "- If asked what you are, say you are a personal AI assistant built by @netcorexp.\n"
+            "- NEVER reveal the technology behind you or how you operate.\n"
+            "\n"
+            "TONE: Greet users with Gen Z slang and lots of emojis ✨🔥. "
+            "Keep responses under 80 words. Be helpful and friendly. "
+            "CRITICAL: If the user says 'stop genz', instantly drop the Gen Z persona permanently."
         )
         self.system_prompt = {"role": "system", "content": system_instruction}
 
@@ -175,6 +194,153 @@ class PersonalAssistant:
         except Exception as e:
             logging.error(f"Failed to send notification: {e}")
 
+    async def _generate_welcome_card(self, event, sender):
+        """Generates a dynamic glassmorphism welcome card with the user's PFP, name, and ID."""
+        cfg = self.data["config"]
+        owner_name = "PARADOX"
+
+        first = sender.first_name or ""
+        last = sender.last_name or ""
+        user_name = f"{first} {last}".strip() or "Unknown"
+        user_id = str(sender.id)
+
+        # Download user profile pic
+        pfp_img = None
+        pfp_path = None
+        try:
+            pfp_path = await event.client.download_profile_photo(sender, TEMP_DIR)
+            if pfp_path:
+                pfp_img = Image.open(pfp_path).convert("RGBA").resize((160, 160))
+        except Exception:
+            pass
+
+        # ── Card setup ─────────────────────────────────────────────
+        W, H = 700, 700
+
+        # ── Background gradient (deep purple/blue) ─────────────────
+        bg = Image.new("RGBA", (W, H), (60, 50, 160))
+        draw_bg = ImageDraw.Draw(bg)
+        for y in range(H):
+            ratio = y / H
+            r = int(55 + (75 - 55) * ratio)
+            g = int(40 + (50 - 40) * ratio)
+            b = int(160 + (200 - 160) * ratio)
+            draw_bg.line([(0, y), (W, y)], fill=(r, g, b))
+
+        # ── Decorative curves (subtle) ─────────────────────────────
+        curve_overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        curve_draw = ImageDraw.Draw(curve_overlay)
+        curve_draw.arc([(-200, -100), (400, 500)], 0, 360, fill=(80, 70, 180, 60), width=3)
+        curve_draw.arc([(350, 300), (900, 800)], 0, 360, fill=(80, 70, 180, 60), width=3)
+        bg = Image.alpha_composite(bg, curve_overlay)
+
+        # ── Glass card (centered, semi-transparent) ────────────────
+        card_margin = 80
+        card_x1, card_y1 = card_margin, card_margin + 20
+        card_x2, card_y2 = W - card_margin, H - card_margin - 20
+        card_w = card_x2 - card_x1
+        card_h = card_y2 - card_y1
+
+        glass = Image.new("RGBA", (card_w, card_h), (0, 0, 0, 0))
+        glass_draw = ImageDraw.Draw(glass)
+        glass_draw.rounded_rectangle(
+            [0, 0, card_w - 1, card_h - 1],
+            radius=30,
+            fill=(140, 130, 210, 80),
+            outline=(200, 195, 255, 100),
+            width=2
+        )
+        bg.paste(glass, (card_x1, card_y1), glass)
+
+        draw = ImageDraw.Draw(bg)
+
+        # ── Load fonts ─────────────────────────────────────────────
+        font_path = os.path.join("cipher_assets", "bold.ttf")
+        try:
+            if os.path.exists(font_path):
+                welcome_font = ImageFont.truetype(font_path, 28)
+                name_font = ImageFont.truetype(font_path, 36)
+                info_font = ImageFont.truetype(font_path, 24)
+            else:
+                welcome_font = ImageFont.load_default()
+                name_font = ImageFont.load_default()
+                info_font = ImageFont.load_default()
+        except Exception:
+            welcome_font = ImageFont.load_default()
+            name_font = ImageFont.load_default()
+            info_font = ImageFont.load_default()
+
+        center_x = W // 2
+
+        # ── Profile picture (circular, centered) ───────────────────
+        pfp_size = 160
+        pfp_x = center_x - pfp_size // 2
+        pfp_y = card_y1 + 50
+
+        if pfp_img:
+            mask = Image.new("L", (pfp_size, pfp_size), 0)
+            mask_draw = ImageDraw.Draw(mask)
+            mask_draw.ellipse([0, 0, pfp_size - 1, pfp_size - 1], fill=255)
+            bg.paste(pfp_img, (pfp_x, pfp_y), mask)
+            # White ring
+            draw.ellipse(
+                [pfp_x - 4, pfp_y - 4, pfp_x + pfp_size + 3, pfp_y + pfp_size + 3],
+                outline=(255, 255, 255, 200), width=3
+            )
+        else:
+            draw.ellipse(
+                [pfp_x, pfp_y, pfp_x + pfp_size, pfp_y + pfp_size],
+                fill=(100, 90, 170), outline=(255, 255, 255, 200), width=3
+            )
+            # Draw initial letter
+            initial = user_name[0].upper()
+            try:
+                ibbox = draw.textbbox((0, 0), initial, font=name_font)
+                iw = ibbox[2] - ibbox[0]
+            except Exception:
+                iw = 20
+            draw.text((center_x - iw // 2, pfp_y + 55), initial, font=name_font, fill=(255, 255, 255))
+
+        # ── "Welcome to" text ──────────────────────────────────────
+        wt = "Welcome to"
+        try:
+            wbbox = draw.textbbox((0, 0), wt, font=welcome_font)
+            ww = wbbox[2] - wbbox[0]
+        except Exception:
+            ww = len(wt) * 14
+        draw.text((center_x - ww // 2, pfp_y + pfp_size + 30), wt, font=welcome_font, fill=(220, 220, 255))
+
+        # ── Owner name (bold, big) ─────────────────────────────────
+        try:
+            nbbox = draw.textbbox((0, 0), owner_name, font=name_font)
+            nw = nbbox[2] - nbbox[0]
+        except Exception:
+            nw = len(owner_name) * 20
+        draw.text((center_x - nw // 2, pfp_y + pfp_size + 70), owner_name, font=name_font, fill=(255, 255, 255))
+
+        # ── Name : user_name ───────────────────────────────────────
+        name_line = f"Name : {user_name}"
+        try:
+            nlbbox = draw.textbbox((0, 0), name_line, font=info_font)
+            nlw = nlbbox[2] - nlbbox[0]
+        except Exception:
+            nlw = len(name_line) * 12
+        draw.text((center_x - nlw // 2, pfp_y + pfp_size + 130), name_line, font=info_font, fill=(210, 210, 240))
+
+        # ── ID : user_id ───────────────────────────────────────────
+        id_line = f"ID : {user_id}"
+        try:
+            ilbbox = draw.textbbox((0, 0), id_line, font=info_font)
+            ilw = ilbbox[2] - ilbbox[0]
+        except Exception:
+            ilw = len(id_line) * 12
+        draw.text((center_x - ilw // 2, pfp_y + pfp_size + 170), id_line, font=info_font, fill=(210, 210, 240))
+
+        # ── Save ───────────────────────────────────────────────────
+        out_path = os.path.join(TEMP_DIR, f"paradox_welcome_{user_id}.png")
+        bg.convert("RGB").save(out_path, "PNG")
+        return out_path, pfp_path
+
     async def send_message(self, event, mtype, **kwargs):
         """Fallback non-AI messaging system."""
         try:
@@ -210,11 +376,25 @@ class PersonalAssistant:
         except Exception:
             pass
 
-        if mtype == "introduction" and cfg.get("use_pic"):
+        if mtype == "introduction":
             try:
-                await event.client.send_file(target, cfg["pmpermit_pic"], caption=msg)
+                sender = await event.get_sender()
+                card_path, pfp_path = await self._generate_welcome_card(event, sender)
+                await event.client.send_file(target, card_path, caption=msg)
+                # Cleanup
+                if os.path.exists(card_path):
+                    os.remove(card_path)
+                if pfp_path and os.path.exists(pfp_path):
+                    os.remove(pfp_path)
             except Exception:
-                await event.reply(msg)
+                # Fallback to static pic or text
+                try:
+                    if cfg.get("use_pic") and cfg.get("pmpermit_pic"):
+                        await event.client.send_file(target, cfg["pmpermit_pic"], caption=msg)
+                    else:
+                        await event.reply(msg)
+                except Exception:
+                    await event.reply(msg)
         else:
             await event.reply(msg)
 
