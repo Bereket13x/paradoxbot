@@ -18,7 +18,7 @@ from telethon import events
 import qrcode
 from qrcode.image.styledpil import StyledPilImage
 from qrcode.image.styles.colormasks import RadialGradiantColorMask, SolidFillColorMask
-# pyzbar removed temporarily for debugging
+import requests
 
 from utils.utils import CipherElite
 from utils.decorators import rishabh
@@ -88,7 +88,7 @@ def generate_styled_qr(data: str, color_name: str, filename: str) -> str:
     return path
 
 async def read_qr(event) -> str:
-    """Read a QR code from a replied image."""
+    """Read a QR code from a replied image using public API."""
     if not event.is_reply:
         return "❌ Please reply to an image containing a QR code."
     
@@ -98,17 +98,14 @@ async def read_qr(event) -> str:
          
     try:
         data = await event.client.download_media(reply, bytes)
-        img = Image.open(BytesIO(data))
-        # decoded = decode(img)
-        decoded = None # Temp fix
+        response = requests.post("http://api.qrserver.com/v1/read-qr-code/", files={"file": ("qr.png", data)})
+        res_json = response.json()
         
-        if not decoded:
+        if not res_json or not res_json[0].get("symbol") or not res_json[0]["symbol"][0].get("data"):
             return "❌ No QR code found in the image."
             
-        result = "**🔍 QR Code Decoded:**\n\n"
-        for obj in decoded:
-            result += f"`{obj.data.decode('utf-8')}`\n"
-        return result
+        decoded_text = res_json[0]["symbol"][0]["data"]
+        return f"**🔍 QR Code Decoded:**\n\n`{decoded_text}`"
     except Exception as e:
         return f"❌ Failed to decode image: `{e}`"
 
