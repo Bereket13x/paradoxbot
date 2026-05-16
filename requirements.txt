@@ -106,4 +106,5 @@ telegraph
 urlextract
 tweepy==4.14.0
 twscrape
-
+qrcode
+pyzbar
