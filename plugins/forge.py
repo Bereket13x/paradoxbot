@@ -74,8 +74,8 @@ def to_rgba_512(img: Image.Image) -> Image.Image:
 
 
 def save_sticker(img: Image.Image, name: str) -> str:
-    path = str(TMP / f"{name}.png")
-    img.save(path, "PNG")
+    path = str(TMP / f"{name}.webp")
+    img.save(path, "WEBP")
     return path
 
 
@@ -546,11 +546,6 @@ def fx_text_sticker(text: str, style: str = "dark") -> Image.Image:
         # Main text
         text_col = (*cfg["text"][:3], 255)
         draw.text((tx, ty), line, font=font, fill=text_col)
-
-    # ── Add style label watermark in corner ──────────────────────────────────
-    small_font = _load_best_font(18)
-    draw.text((16, 488), f"PARADOX · {style.upper()}", font=small_font,
-              fill=(*cfg["text"][:3], 120))
 
     return bg
 
