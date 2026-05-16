@@ -13,7 +13,8 @@ from telethon.errors.rpcerrorlist import UsernameOccupiedError
 from telethon.tl.functions.account import UpdateUsernameRequest
 from telethon.tl.functions.channels import GetAdminedPublicChannelsRequest
 from telethon.tl.functions.photos import DeletePhotosRequest, GetUserPhotosRequest
-from telethon.tl.types import Channel, Chat, InputPhoto, User
+from telethon.tl.types import Channel, Chat, InputPhoto, User, InputUser
+from telethon.tl.functions.users import GetUsersRequest
 
 from plugins.bot import add_handler
 from utils.utils import CipherElite
@@ -27,7 +28,8 @@ def init(client):
         ".pusername <new username>",
         ".count",
         ".delpfp <amount>",
-        ".myusernames"
+        ".myusernames",
+        ".realname <@user/reply> - Show their REAL Telegram name (not contact name)"
     ]
     desc = "Profile management tools natively ported for CipherElite."
     add_handler("profile", commands, desc)
@@ -217,3 +219,60 @@ async def myusernames(event):
         for channel_obj in result.chats
     )
     await event.edit(output_str)
+
+
+@CipherElite.on(events.NewMessage(pattern=r"\.realname(?:\s+(.+))?$"))
+@rishabh()
+async def real_name(event):
+    """Fetches the REAL Telegram name of a user, bypassing contact names."""
+    target = (event.pattern_match.group(1) or "").strip()
+    
+    if not target and not event.is_reply:
+        return await event.edit("❌ **Usage:** `.realname @username` or reply to someone.")
+    
+    await event.edit("🔍 **Looking up real identity...**")
+    
+    try:
+        if event.is_reply and not target:
+            reply = await event.get_reply_message()
+            user_id = reply.sender_id
+        else:
+            user_id = target.lstrip("@")
+        
+        # Use GetUsersRequest to get the raw user object from Telegram
+        # This returns the REAL name set by the user, not contact overrides
+        result = await event.client(GetUsersRequest(id=[user_id]))
+        
+        if not result:
+            return await event.edit("❌ **User not found.**")
+        
+        user = result[0]
+        
+        first = user.first_name or ""
+        last = user.last_name or ""
+        real_name = f"{first} {last}".strip() or "(No name set)"
+        username = f"@{user.username}" if user.username else "(No username)"
+        user_id_num = user.id
+        is_bot = "🤖 Yes" if user.bot else "👤 No"
+        is_premium = "⭐ Yes" if getattr(user, 'premium', False) else "❌ No"
+        is_verified = "✅ Yes" if getattr(user, 'verified', False) else "❌ No"
+        is_scam = "⚠️ YES" if getattr(user, 'scam', False) else "❌ No"
+        is_fake = "🚨 YES" if getattr(user, 'fake', False) else "❌ No"
+        
+        text = (
+            f"🔍 **𝐑𝐄𝐀𝐋 𝐈𝐃𝐄𝐍𝐓𝐈𝐓𝐘** 🔍\n"
+            f"⟡ ═══════════════════ ⟡\n\n"
+            f"  📛 **Real Name:** `{real_name}`\n"
+            f"  🆔 **Username:** `{username}`\n"
+            f"  🔢 **User ID:** `{user_id_num}`\n\n"
+            f"  🤖 **Bot:** {is_bot}\n"
+            f"  ⭐ **Premium:** {is_premium}\n"
+            f"  ✅ **Verified:** {is_verified}\n"
+            f"  ⚠️ **Scam:** {is_scam}\n"
+            f"  🚨 **Fake:** {is_fake}\n\n"
+            f"⟡ ═══════════════════ ⟡"
+        )
+        await event.edit(text)
+        
+    except Exception as e:
+        await event.edit(f"❌ **Error:** `{e}`")
