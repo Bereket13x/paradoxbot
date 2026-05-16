@@ -36,6 +36,7 @@ RUN apt-get update && apt-get install -y \
     ffmpeg \
     libsm6 \
     libxext6 \
+    libzbar0 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the requirements file and install Python modules
