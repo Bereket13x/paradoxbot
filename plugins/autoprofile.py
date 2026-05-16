@@ -37,7 +37,8 @@ BG_PATH = os.path.join(ASSETS_DIR, "bg.jpg")
 RUNNING_TASKS = {
     "autoname": {"running": False, "style": "time", "text": "PARADOX", "frame": 0},
     "autobio": {"running": False, "style": "time", "text": "PARADOX", "frame": 0},
-    "digitalpfp": {"running": False}
+    "digitalpfp": {"running": False},
+    "forgepfp": {"running": False, "frame": 0, "username": ""}
 }
 
 ANIMATIONS = {
@@ -150,6 +151,79 @@ def generate_time_pfp():
     img.convert("RGB").save(PFP_PATH)
     return PFP_PATH
 
+def generate_forge_pfp(display_name: str, tg_username: str, frame: int) -> str:
+    """Generates a styled PFP using Forge assets with Time, Name, and Username."""
+    try:
+        from plugins.forge import TEXT_STYLES, _make_gradient_bg, _load_best_font
+    except ImportError:
+        return ""
+        
+    style_names = list(TEXT_STYLES.keys())
+    style_name = style_names[frame % len(style_names)]
+    cfg = TEXT_STYLES[style_name]
+    
+    bg = _make_gradient_bg(cfg["bg"], (512, 512)).convert("RGBA")
+    
+    # Add subtle noise overlay
+    import random as _rnd
+    noise = Image.new("RGBA", (512, 512), (0, 0, 0, 0))
+    noise_draw = ImageDraw.Draw(noise)
+    for _ in range(600):
+        x = _rnd.randint(0, 511)
+        y = _rnd.randint(0, 511)
+        a = _rnd.randint(10, 40)
+        noise_draw.point((x, y), fill=(255, 255, 255, a))
+    bg = Image.alpha_composite(bg, noise)
+    
+    eat_now = get_eat_time()
+    time_str = eat_now.strftime("%I:%M %p")
+    
+    time_font = _load_best_font(110) # Big visible time
+    name_font = _load_best_font(45)
+    user_font = _load_best_font(30)
+    style_font = _load_best_font(18)
+    
+    draw = ImageDraw.Draw(bg)
+    
+    def draw_styled_text(draw, text, font, y_pos, cfg):
+        try:
+            bbox = draw.textbbox((0, 0), text, font=font)
+            tw = bbox[2] - bbox[0]
+        except Exception:
+            tw = len(text) * 20
+        tx = (512 - tw) // 2
+        ty = y_pos
+        
+        outline_col = (*cfg["outline"][:3], 255)
+        for ox, oy in [(-2,-2),(2,-2),(-2,2),(2,2),(-3,0),(3,0),(0,-3),(0,3)]:
+            draw.text((tx + ox, ty + oy), text, font=font, fill=outline_col)
+
+        shadow_col = (*cfg["shadow"][:3], 180)
+        draw.text((tx + 5, ty + 5), text, font=font, fill=shadow_col)
+        draw.text((tx + 4, ty + 4), text, font=font, fill=shadow_col)
+
+        text_col = (*cfg["text"][:3], 255)
+        draw.text((tx, ty), text, font=font, fill=text_col)
+
+    # ── Draw Elements ───────────────────────────────────────
+    # 1. Massive Time at top center
+    draw_styled_text(draw, time_str, time_font, 140, cfg)
+    
+    # 2. Display Name in the middle
+    display = display_name.upper()[:20]
+    draw_styled_text(draw, display, name_font, 300, cfg)
+    
+    # 3. Username / Handle slightly smaller below
+    draw_styled_text(draw, tg_username, user_font, 360, cfg)
+    
+    # 4. Small watermark in corner
+    if style_font:
+        draw.text((16, 485), f"STYLE: {style_name.upper()}", font=style_font, fill=(*cfg["text"][:3], 150))
+    
+    path = os.path.join(ASSETS_DIR, "forge_pfp.jpg")
+    bg.convert("RGB").save(path, "JPEG")
+    return path
+
 # --- Async Loops ---
 
 async def loop_autoname(client):
@@ -225,6 +299,42 @@ async def loop_digitalpfp(client):
             await notify_user(client, f"❌ PFP Error: {str(e)}")
         await asyncio.sleep(60)
 
+async def loop_forgepfp(client):
+    while RUNNING_TASKS["forgepfp"]["running"]:
+        try:
+            me = await client.get_me()
+            
+            # 1. Get the cleanest Display Name
+            if RUNNING_TASKS["autoname"]["running"]:
+                display_name = RUNNING_TASKS["autoname"]["text"]
+            else:
+                first = me.first_name or "USER"
+                if "|" in first:
+                    first = first.split("|")[-1].strip()
+                last = f" {me.last_name}" if me.last_name else ""
+                display_name = f"{first}{last}".strip()
+                
+            # 2. Get the @username
+            tg_username = f"@{me.username}" if me.username else "PARADOX USER"
+            
+            frame = RUNNING_TASKS["forgepfp"]["frame"]
+            
+            pfp_file = generate_forge_pfp(display_name, tg_username, frame)
+            if os.path.exists(pfp_file):
+                file = await client.upload_file(pfp_file)
+                await client(functions.photos.UploadProfilePhotoRequest(file=file))
+                os.remove(pfp_file)
+                RUNNING_TASKS["forgepfp"]["frame"] += 1
+            else:
+                await notify_user(client, "⚠️ Forge PFP Gen Error")
+        except FloodWaitError as e:
+            await notify_user(client, f"🛑 Forge PFP Stopped: FloodWait {e.seconds}s")
+            RUNNING_TASKS["forgepfp"]["running"] = False
+            break
+        except Exception as e:
+            await notify_user(client, f"❌ Forge PFP Error: {str(e)}")
+        await asyncio.sleep(60)
+
 # --- Plugin Init ---
 
 def init(client_instance):
@@ -232,6 +342,7 @@ def init(client_instance):
         ".autoname <style> <text> - Rotating custom emojis in Name",
         ".autobio <style> <text> - Rotating custom emojis in Bio",
         ".digitalpfp - Start Bold Time PFP",
+        ".forgepfp - Start dynamically styled Forge Time PFP",
         ".nstyles - List all available styles",
         ".end <task> - Stop task"
     ]
@@ -303,6 +414,21 @@ async def register_commands():
             RUNNING_TASKS["digitalpfp"]["running"] = True
             CipherElite.loop.create_task(loop_digitalpfp(event.client))
             await status.edit("🎭 **Digital PFP Started**\nIf your image is missing, a backup Cyberpunk image was used.")
+        except FloodWaitError as e:
+            await status.edit(f"❌ FloodWait: {e.seconds}s")
+        except Exception as e:
+            await status.edit(f"❌ Error: {str(e)}")
+
+    @CipherElite.on(events.NewMessage(pattern=r"^\.forgepfp$"))
+    @rishabh()
+    async def enable_forgepfp(event):
+        if RUNNING_TASKS["forgepfp"]["running"]: return await event.reply("⚠️ Forge PFP already running.")
+        status = await event.reply("🔄 **Starting Forge PFP...**")
+        
+        try:
+            RUNNING_TASKS["forgepfp"]["running"] = True
+            CipherElite.loop.create_task(loop_forgepfp(event.client))
+            await status.edit("🎭 **Forge PFP Started!**\nAutomatically changing profile picture styles every minute.")
         except FloodWaitError as e:
             await status.edit(f"❌ FloodWait: {e.seconds}s")
         except Exception as e:
