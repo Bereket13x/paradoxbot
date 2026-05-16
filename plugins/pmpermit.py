@@ -255,13 +255,32 @@ class PersonalAssistant:
 
         draw = ImageDraw.Draw(bg)
 
-        # ── Load fonts ─────────────────────────────────────────────
-        font_path = os.path.join("cipher_assets", "bold.ttf")
+        # ── Load fonts (Unicode — supports ALL languages) ──────────
+        unicode_font_path = os.path.join(TEMP_DIR, "ArialUnicodeMS.ttf")
+        fallback_font_path = os.path.join("cipher_assets", "bold.ttf")
+
+        # Auto-download Unicode font if not cached
+        if not os.path.exists(unicode_font_path):
+            try:
+                import requests
+                font_url = "https://github.com/ArtifexSoftware/mupdf/raw/refs/heads/master/resources/fonts/droid/DroidSansFallbackFull.ttf"
+                resp = requests.get(font_url, timeout=30)
+                if resp.status_code == 200:
+                    with open(unicode_font_path, "wb") as f:
+                        f.write(resp.content)
+            except Exception:
+                pass
+
+        # Pick the best available font
         try:
-            if os.path.exists(font_path):
-                welcome_font = ImageFont.truetype(font_path, 28)
-                name_font = ImageFont.truetype(font_path, 36)
-                info_font = ImageFont.truetype(font_path, 24)
+            if os.path.exists(unicode_font_path):
+                welcome_font = ImageFont.truetype(unicode_font_path, 28)
+                name_font = ImageFont.truetype(unicode_font_path, 36)
+                info_font = ImageFont.truetype(unicode_font_path, 24)
+            elif os.path.exists(fallback_font_path):
+                welcome_font = ImageFont.truetype(fallback_font_path, 28)
+                name_font = ImageFont.truetype(fallback_font_path, 36)
+                info_font = ImageFont.truetype(fallback_font_path, 24)
             else:
                 welcome_font = ImageFont.load_default()
                 name_font = ImageFont.load_default()
