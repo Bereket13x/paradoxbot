@@ -389,8 +389,21 @@ async def loop_forgepfp(client):
                 await notify_user(client, "⚠️ Forge PFP Gen Error")
         except FloodWaitError as e:
             wait_mins = round(e.seconds / 60)
-            await notify_user(client, f"⏳ **Forge PFP FloodWait!**\nTelegram blocked profile changes for **{wait_mins} minutes** ({e.seconds}s).\nAuto-resuming after the wait...")
-            await asyncio.sleep(e.seconds + 10)  # Wait it out, then resume
+            # Delete current forge PFP to restore original profile picture
+            last_id = RUNNING_TASKS["forgepfp"].get("last_photo_id")
+            last_hash = RUNNING_TASKS["forgepfp"].get("last_photo_hash")
+            if last_id and last_hash:
+                try:
+                    from telethon.tl.types import InputPhoto
+                    from telethon.tl.functions.photos import DeletePhotosRequest
+                    await client(DeletePhotosRequest(id=[InputPhoto(id=last_id, access_hash=last_hash, file_reference=b'')]))
+                    RUNNING_TASKS["forgepfp"]["last_photo_id"] = None
+                    RUNNING_TASKS["forgepfp"]["last_photo_hash"] = None
+                    save_state()
+                except Exception:
+                    pass
+            await notify_user(client, f"⏳ **Forge PFP FloodWait!**\nRestored original profile picture.\nTelegram blocked changes for **{wait_mins} minutes** ({e.seconds}s).\nAuto-resuming after the wait...")
+            await asyncio.sleep(e.seconds + 10)
             continue
         except RPCError as e:
             await notify_user(client, f"⚠️ **Forge PFP RPC Error:** `{e}`\nRetrying in 3 minutes...")
