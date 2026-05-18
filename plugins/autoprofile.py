@@ -239,7 +239,8 @@ def generate_forge_pfp(display_name: str, tg_username: str, frame: int) -> str:
     
     # 4. Small watermark in corner
     if style_font:
-        draw.text((16, 485), f"STYLE: {style_name.upper()}", font=style_font, fill=(*cfg["text"][:3], 150))
+        draw.text((16, 485), "PARADOX", font=style_font, fill=(*cfg["text"][:3], 150))
+        draw.text((16, 16), "UPDATES EVERY 5 MIN", font=style_font, fill=(*cfg["text"][:3], 150))
     
     path = os.path.join(ASSETS_DIR, "forge_pfp.jpg")
     bg.convert("RGB").save(path, "JPEG")
@@ -406,14 +407,14 @@ async def loop_forgepfp(client):
             await asyncio.sleep(e.seconds + 10)
             continue
         except RPCError as e:
-            await notify_user(client, f"⚠️ **Forge PFP RPC Error:** `{e}`\nRetrying in 3 minutes...")
-            await asyncio.sleep(180)
+            await notify_user(client, f"⚠️ **Forge PFP RPC Error:** `{e}`\nRetrying in 5 minutes...")
+            await asyncio.sleep(300)
             continue
         except Exception as e:
-            await notify_user(client, f"❌ **Forge PFP Error:** `{str(e)}`\nRetrying in 3 minutes...")
-            await asyncio.sleep(180)
+            await notify_user(client, f"❌ **Forge PFP Error:** `{str(e)}`\nRetrying in 5 minutes...")
+            await asyncio.sleep(300)
             continue
-        await asyncio.sleep(180)
+        await asyncio.sleep(300)
 
 # --- Plugin Init ---
 
@@ -536,7 +537,7 @@ async def register_commands():
             RUNNING_TASKS["forgepfp"]["running"] = True
             save_state()
             CipherElite.loop.create_task(loop_forgepfp(event.client))
-            await status.edit("🎭 **Forge PFP Started!**\nAutomatically changing profile picture styles every minute.")
+            await status.edit("🎭 **Forge PFP Started!**\nAutomatically changing profile picture styles every 5 minutes.")
         except FloodWaitError as e:
             await status.edit(f"❌ FloodWait: {e.seconds}s")
         except Exception as e:
