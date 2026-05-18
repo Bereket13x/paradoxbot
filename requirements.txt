@@ -1,8 +1,8 @@
 about-time==4.2.1
 aiofiles==24.1.0
-openai>=1.0.0
+openai==1.68.2
 aiogram==3.19.0
-google-generativeai>=0.4.0
+google-generativeai==0.8.6
 aiohappyeyeballs==2.4.4
 aiohttp==3.11.11
 aiolimiter==1.2.1
@@ -107,4 +107,5 @@ urlextract
 tweepy==4.14.0
 twscrape
 qrcode
+pyzbar
 shazamio
