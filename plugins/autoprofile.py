@@ -40,7 +40,8 @@ RUNNING_TASKS = {
     "autoname": {"running": False, "style": "time", "text": "PARADOX", "frame": 0},
     "autobio": {"running": False, "style": "time", "text": "PARADOX", "frame": 0},
     "digitalpfp": {"running": False},
-    "forgepfp": {"running": False, "frame": 0, "username": ""}
+    "forgepfp": {"running": False, "frame": 0, "username": ""},
+    "status": {"active": False, "mood": "", "frame": 0, "original_first": None, "original_last": None, "original_bio": None, "last_photo_id": None, "last_photo_hash": None}
 }
 
 def save_state():
@@ -80,6 +81,73 @@ ANIMATIONS = {
     "cyber": ["[ • • • ]", "[ = • • ]", "[ = = • ]", "[ = = = ]", "[ • = = ]", "[ • • = ]"],
     "hacker": ["█▓▒░", "▓▒░█", "▒░█▓", "░█▓▒"],
     "braille": ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"],
+}
+
+STATUS_MOODS = {
+    "coding": {
+        "bgs": [
+            "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&w=1024&q=80",
+            "https://images.unsplash.com/photo-1542831371-29b0f74f9713?auto=format&fit=crop&w=1024&q=80",
+            "https://images.unsplash.com/photo-1555066931-4365d14bab8c?auto=format&fit=crop&w=1024&q=80"
+        ],
+        "emoji": "💻", "text": "CODING", "bio": "Deep in the code. Expect slow replies.", "suffix": " | [CODING]"
+    },
+    "sleep": {
+        "bgs": [
+            "https://images.unsplash.com/photo-1531306728370-53bf9ce45f40?auto=format&fit=crop&w=1024&q=80",
+            "https://images.unsplash.com/photo-1516585427167-9f4af9627e6c?auto=format&fit=crop&w=1024&q=80",
+            "https://images.unsplash.com/photo-1512438248247-f0f2a5a8b7f0?auto=format&fit=crop&w=1024&q=80"
+        ],
+        "emoji": "💤", "text": "SLEEPING", "bio": "Currently sleeping. Leave a message.", "suffix": " | [Zzz]"
+    },
+    "gaming": {
+        "bgs": [
+            "https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=1024&q=80",
+            "https://images.unsplash.com/photo-1493711662062-fa541adb3fc8?auto=format&fit=crop&w=1024&q=80",
+            "https://images.unsplash.com/photo-1552820728-8b83bb6b773f?auto=format&fit=crop&w=1024&q=80"
+        ],
+        "emoji": "🎮", "text": "GAMING", "bio": "In the zone. Gaming right now.", "suffix": " | [GAMING]"
+    },
+    "music": {
+        "bgs": [
+            "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?auto=format&fit=crop&w=1024&q=80",
+            "https://images.unsplash.com/photo-1470225620780-dba8ba36b745?auto=format&fit=crop&w=1024&q=80",
+            "https://images.unsplash.com/photo-1514525253161-7a46d19cd819?auto=format&fit=crop&w=1024&q=80"
+        ],
+        "emoji": "🎧", "text": "MUSIC", "bio": "Vibing to some music.", "suffix": " | [MUSIC]"
+    },
+    "dnd": {
+        "bgs": [
+            "https://images.unsplash.com/photo-1507608616759-54f48f0af0ee?auto=format&fit=crop&w=1024&q=80",
+            "https://images.unsplash.com/photo-1494809610410-160faaed4de0?auto=format&fit=crop&w=1024&q=80",
+            "https://images.unsplash.com/photo-1482440308425-276ad0f28b19?auto=format&fit=crop&w=1024&q=80"
+        ],
+        "emoji": "🚫", "text": "DO NOT DISTURB", "bio": "Do Not Disturb. Important work in progress.", "suffix": " | [DND]"
+    },
+    "workout": {
+        "bgs": [
+            "https://images.unsplash.com/photo-1517836357463-d25dfeac3438?auto=format&fit=crop&w=1024&q=80",
+            "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?auto=format&fit=crop&w=1024&q=80",
+            "https://images.unsplash.com/photo-1581009146145-b5ef050c2e1e?auto=format&fit=crop&w=1024&q=80"
+        ],
+        "emoji": "🏋️‍♂️", "text": "WORKOUT", "bio": "At the gym pushing limits.", "suffix": " | [GYM]"
+    },
+    "travel": {
+        "bgs": [
+            "https://images.unsplash.com/photo-1436491865332-7a61a109cc05?auto=format&fit=crop&w=1024&q=80",
+            "https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?auto=format&fit=crop&w=1024&q=80",
+            "https://images.unsplash.com/photo-1488646953014-85cb44e25828?auto=format&fit=crop&w=1024&q=80"
+        ],
+        "emoji": "✈️", "text": "TRAVELING", "bio": "On the move. Traveling the world.", "suffix": " | [TRAVEL]"
+    },
+    "anime": {
+        "bgs": [
+            "https://images.unsplash.com/photo-1578632767115-351597cf2477?auto=format&fit=crop&w=1024&q=80",
+            "https://images.unsplash.com/photo-1580477651161-0428bc4bd93b?auto=format&fit=crop&w=1024&q=80",
+            "https://images.unsplash.com/photo-1541562232579-512a21360020?auto=format&fit=crop&w=1024&q=80"
+        ],
+        "emoji": "🎌", "text": "WATCHING ANIME", "bio": "In another world right now. Do not disturb.", "suffix": " | [ANIME]"
+    }
 }
 
 # --- Helper Functions ---
@@ -171,6 +239,55 @@ def generate_time_pfp():
 
     img.convert("RGB").save(PFP_PATH)
     return PFP_PATH
+
+def generate_status_pfp(mood_key: str, frame: int = 0):
+    mood = STATUS_MOODS.get(mood_key)
+    if not mood: return None
+    
+    bgs = mood["bgs"]
+    bg_url = bgs[frame % len(bgs)]
+    filename = os.path.join(ASSETS_DIR, f"status_bg_{mood_key}_{frame % len(bgs)}.jpg")
+    download_file(bg_url, filename)
+    
+    if os.path.exists(filename):
+        try:
+            img = Image.open(filename).convert("RGBA").resize((1024, 1024))
+        except:
+            img = Image.new("RGBA", (1024, 1024), (20, 20, 20, 255))
+    else:
+        img = Image.new("RGBA", (1024, 1024), (20, 20, 20, 255))
+        
+    # Dark vignette / overlay for readability
+    overlay = Image.new("RGBA", (1024, 1024), (0, 0, 0, 0))
+    draw_ov = ImageDraw.Draw(overlay)
+    for y in range(1024):
+        alpha = int(120 + (100 * (y / 1024))) 
+        draw_ov.line([(0, y), (1024, y)], fill=(0, 0, 0, alpha))
+    img = Image.alpha_composite(img, overlay)
+    
+    draw = ImageDraw.Draw(img)
+    download_file(FONT_URL, FONT_PATH)
+    try:
+        title_font = ImageFont.truetype(FONT_PATH, 120)
+        subtitle_font = ImageFont.truetype(FONT_PATH, 40)
+        watermark_font = ImageFont.truetype(FONT_PATH, 30)
+    except:
+        title_font = ImageFont.load_default()
+        subtitle_font = ImageFont.load_default()
+        watermark_font = ImageFont.load_default()
+        
+    text = mood["text"]
+    
+    def draw_outlined(d, pos, txt, font, fill, stroke, width=3):
+        d.text(pos, txt, font=font, fill=fill, anchor="mm", stroke_width=width, stroke_fill=stroke)
+
+    draw_outlined(draw, (512, 450), "STATUS UPDATE", subtitle_font, "#00ffcc", "black", 2)
+    draw_outlined(draw, (512, 530), text, title_font, "white", "black", 5)
+    draw_outlined(draw, (512, 950), "🎭 PARADOX PROFILE", watermark_font, (255,255,255,180), "black", 1)
+    
+    out_path = os.path.join(ASSETS_DIR, "current_status.jpg")
+    img.convert("RGB").save(out_path)
+    return out_path
 
 def generate_forge_pfp(display_name: str, tg_username: str, frame: int) -> str:
     """Generates a styled PFP using Forge assets with Time, Name, and Username."""
@@ -416,6 +533,47 @@ async def loop_forgepfp(client):
             continue
         await asyncio.sleep(300)
 
+async def loop_status(client):
+    while RUNNING_TASKS["status"]["active"]:
+        try:
+            mood_key = RUNNING_TASKS["status"].get("mood")
+            if not mood_key or mood_key not in STATUS_MOODS:
+                await asyncio.sleep(60)
+                continue
+                
+            frame = RUNNING_TASKS["status"].get("frame", 0)
+            pfp_file = generate_status_pfp(mood_key, frame)
+            
+            if pfp_file and os.path.exists(pfp_file):
+                file = await client.upload_file(pfp_file)
+                res = await client(functions.photos.UploadProfilePhotoRequest(file=file))
+                
+                last_id = RUNNING_TASKS["status"].get("last_photo_id")
+                last_hash = RUNNING_TASKS["status"].get("last_photo_hash")
+                if last_id and last_hash:
+                    try:
+                        from telethon.tl.types import InputPhoto
+                        from telethon.tl.functions.photos import DeletePhotosRequest
+                        await client(DeletePhotosRequest(id=[InputPhoto(id=last_id, access_hash=last_hash, file_reference=b'')]))
+                    except Exception:
+                        pass
+                        
+                RUNNING_TASKS["status"]["last_photo_id"] = getattr(res.photo, "id", None)
+                RUNNING_TASKS["status"]["last_photo_hash"] = getattr(res.photo, "access_hash", None)
+                RUNNING_TASKS["status"]["frame"] = frame + 1
+                save_state()
+            else:
+                await notify_user(client, "⚠️ Status PFP Gen Error")
+        except FloodWaitError as e:
+            await notify_user(client, f"⏳ **Status PFP FloodWait:** {e.seconds}s.")
+            await asyncio.sleep(e.seconds + 10)
+            continue
+        except Exception as e:
+            await notify_user(client, f"❌ **Status PFP Error:** `{str(e)}`")
+            await asyncio.sleep(300)
+            continue
+        await asyncio.sleep(300)
+
 # --- Plugin Init ---
 
 def init(client_instance):
@@ -424,6 +582,8 @@ def init(client_instance):
         ".autobio <style> <text> - Rotating custom emojis in Bio",
         ".digitalpfp - Start Bold Time PFP",
         ".forgepfp - Start dynamically styled Forge Time PFP",
+        ".setstatus <mood> - Set profile status (coding, sleep, gaming, etc.)",
+        ".setstatus reverse - Revert to original profile",
         ".nstyles - List all available styles",
         ".end <task> - Stop task"
     ]
@@ -440,6 +600,8 @@ async def register_commands():
         CipherElite.loop.create_task(loop_digitalpfp(CipherElite))
     if RUNNING_TASKS["forgepfp"]["running"]:
         CipherElite.loop.create_task(loop_forgepfp(CipherElite))
+    if RUNNING_TASKS["status"]["active"]:
+        CipherElite.loop.create_task(loop_status(CipherElite))
 
     @CipherElite.on(events.NewMessage(pattern=r"^\.nstyles$"))
     @rishabh()
@@ -554,3 +716,99 @@ async def register_commands():
         else:
             await event.reply("❌ Invalid task")
 
+    @CipherElite.on(events.NewMessage(pattern=r"^\.setstatus(?:\s+(.+))?$"))
+    @rishabh()
+    async def cmd_setstatus(event):
+        mood_key = (event.pattern_match.group(1) or "").strip().lower()
+        
+        if not mood_key:
+            moods_list = ", ".join(STATUS_MOODS.keys())
+            return await event.reply(f"🎭 **PARADOX Status Modes**\n\n**Available:** `{moods_list}`\n\n**Usage:** `.setstatus coding`\n**Revert:** `.setstatus reverse`")
+            
+        if mood_key == "reverse":
+            if not RUNNING_TASKS["status"]["active"]:
+                return await event.reply("⚠️ No active status to reverse.")
+                
+            msg = await event.reply("🔄 **Reversing status to original...**")
+            me = await event.client.get_me()
+            
+            # Revert PFP
+            last_id = RUNNING_TASKS["status"].get("last_photo_id")
+            last_hash = RUNNING_TASKS["status"].get("last_photo_hash")
+            if last_id and last_hash:
+                try:
+                    from telethon.tl.types import InputPhoto
+                    from telethon.tl.functions.photos import DeletePhotosRequest
+                    await event.client(DeletePhotosRequest(id=[InputPhoto(id=last_id, access_hash=last_hash, file_reference=b'')]))
+                except Exception:
+                    pass
+            
+            # Revert Bio and Name
+            orig_first = RUNNING_TASKS["status"].get("original_first") or (me.first_name if me.first_name else "User")
+            orig_last = RUNNING_TASKS["status"].get("original_last") or ""
+            orig_bio = RUNNING_TASKS["status"].get("original_bio") or ""
+            
+            try:
+                await event.client(functions.account.UpdateProfileRequest(
+                    first_name=orig_first,
+                    last_name=orig_last,
+                    about=orig_bio
+                ))
+            except Exception:
+                pass
+                
+            RUNNING_TASKS["status"] = {"active": False, "original_first": None, "original_last": None, "original_bio": None, "last_photo_id": None, "last_photo_hash": None}
+            save_state()
+            await msg.edit("✅ **Original profile restored.**")
+            return
+
+        if mood_key not in STATUS_MOODS:
+            return await event.reply(f"❌ **Invalid mood!** Choose from: `{', '.join(STATUS_MOODS.keys())}`")
+            
+        mood = STATUS_MOODS[mood_key]
+        msg = await event.reply(f"🔄 **Setting Status:** `{mood['text']}`...")
+        
+        # Stop auto-updates if running
+        for t in ["autoname", "autobio", "digitalpfp", "forgepfp"]:
+            if t in RUNNING_TASKS and isinstance(RUNNING_TASKS[t], dict) and "running" in RUNNING_TASKS[t]:
+                RUNNING_TASKS[t]["running"] = False
+            
+        me = await event.client.get_me()
+        
+        # Save original info if not currently active
+        if not RUNNING_TASKS["status"]["active"]:
+            try:
+                full = await event.client(functions.users.GetFullUserRequest(me))
+                bio = getattr(full.full_user, 'about', "") or ""
+            except:
+                bio = ""
+                
+            first = me.first_name or "USER"
+            if " | " in first:
+                first = first.split(" | ")[0].strip()
+                
+            RUNNING_TASKS["status"]["original_first"] = first
+            RUNNING_TASKS["status"]["original_last"] = me.last_name or ""
+            RUNNING_TASKS["status"]["original_bio"] = bio
+            
+        RUNNING_TASKS["status"]["active"] = True
+        
+        # 1. Update Name and Bio
+        new_first = f"{RUNNING_TASKS['status']['original_first']}{mood['suffix']}"
+        new_bio = f"{mood['emoji']} {mood['bio']}"
+        
+        try:
+            await event.client(functions.account.UpdateProfileRequest(
+                first_name=new_first[:64], 
+                about=new_bio[:70]
+            ))
+        except FloodWaitError as e:
+            await msg.edit(f"❌ **FloodWait:** {e.seconds}s. Try again later.")
+            return
+            
+        RUNNING_TASKS["status"]["mood"] = mood_key
+        RUNNING_TASKS["status"]["frame"] = 0
+        
+        save_state()
+        CipherElite.loop.create_task(loop_status(event.client))
+        await msg.edit(f"🎭 **Status Updated!**\n\n✨ **Mood:** `{mood['text']}`\n✅ **Profile synced.**\n🔄 _PFP will animate every 5 mins._\n\n_Use `.setstatus reverse` to revert._")
