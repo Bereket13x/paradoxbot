@@ -41,7 +41,7 @@ RUNNING_TASKS = {
     "autobio": {"running": False, "style": "time", "text": "PARADOX", "frame": 0},
     "digitalpfp": {"running": False},
     "forgepfp": {"running": False, "frame": 0, "username": ""},
-    "status": {"active": False, "mood": "", "frame": 0, "original_first": None, "original_last": None, "original_bio": None, "last_photo_id": None, "last_photo_hash": None}
+    "status": {"active": False, "mood": "", "frame": 0, "original_first": None, "original_last": None, "original_bio": None, "last_photo_id": None, "last_photo_hash": None, "paused_tasks": []}
 }
 
 def save_state():
@@ -757,9 +757,21 @@ async def register_commands():
             except Exception:
                 pass
                 
-            RUNNING_TASKS["status"] = {"active": False, "original_first": None, "original_last": None, "original_bio": None, "last_photo_id": None, "last_photo_hash": None}
+            paused_tasks = RUNNING_TASKS["status"].get("paused_tasks", [])
+            restarted_msg = ""
+            for t in paused_tasks:
+                if t in RUNNING_TASKS:
+                    RUNNING_TASKS[t]["running"] = True
+                    if t == "autoname": CipherElite.loop.create_task(loop_autoname(event.client))
+                    elif t == "autobio": CipherElite.loop.create_task(loop_autobio(event.client))
+                    elif t == "digitalpfp": CipherElite.loop.create_task(loop_digitalpfp(event.client))
+                    elif t == "forgepfp": CipherElite.loop.create_task(loop_forgepfp(event.client))
+            if paused_tasks:
+                restarted_msg = f"\n▶️ **Restarted tasks:** `{', '.join(paused_tasks)}`"
+                
+            RUNNING_TASKS["status"] = {"active": False, "mood": "", "frame": 0, "original_first": None, "original_last": None, "original_bio": None, "last_photo_id": None, "last_photo_hash": None, "paused_tasks": []}
             save_state()
-            await msg.edit("✅ **Original profile restored.**")
+            await msg.edit(f"✅ **Original profile restored.**{restarted_msg}")
             return
 
         if mood_key not in STATUS_MOODS:
@@ -768,20 +780,24 @@ async def register_commands():
         mood = STATUS_MOODS[mood_key]
         msg = await event.reply(f"🔄 **Setting Status:** `{mood['text']}`...")
         
-        # Stop auto-updates if running
-        for t in ["autoname", "autobio", "digitalpfp", "forgepfp"]:
-            if t in RUNNING_TASKS and isinstance(RUNNING_TASKS[t], dict) and "running" in RUNNING_TASKS[t]:
-                RUNNING_TASKS[t]["running"] = False
-            
-        me = await event.client.get_me()
-        
-        # Save original info if not currently active
         if not RUNNING_TASKS["status"]["active"]:
+            paused_tasks = []
+            for t in ["autoname", "autobio", "digitalpfp", "forgepfp"]:
+                if t in RUNNING_TASKS and isinstance(RUNNING_TASKS[t], dict) and RUNNING_TASKS[t].get("running"):
+                    paused_tasks.append(t)
+                    RUNNING_TASKS[t]["running"] = False
+            RUNNING_TASKS["status"]["paused_tasks"] = paused_tasks
+            
+            me = await event.client.get_me()
             try:
-                full = await event.client(functions.users.GetFullUserRequest(me))
+                full = await event.client(functions.users.GetFullUserRequest(id="me"))
                 bio = getattr(full.full_user, 'about', "") or ""
-            except:
-                bio = ""
+            except Exception:
+                try:
+                    full = await event.client(functions.users.GetFullUserRequest(id=me.id))
+                    bio = getattr(full.full_user, 'about', "") or ""
+                except Exception:
+                    bio = ""
                 
             first = me.first_name or "USER"
             if " | " in first:
@@ -790,7 +806,11 @@ async def register_commands():
             RUNNING_TASKS["status"]["original_first"] = first
             RUNNING_TASKS["status"]["original_last"] = me.last_name or ""
             RUNNING_TASKS["status"]["original_bio"] = bio
-            
+        else:
+            for t in ["autoname", "autobio", "digitalpfp", "forgepfp"]:
+                if t in RUNNING_TASKS and isinstance(RUNNING_TASKS[t], dict) and RUNNING_TASKS[t].get("running"):
+                    RUNNING_TASKS[t]["running"] = False
+                    
         RUNNING_TASKS["status"]["active"] = True
         
         # 1. Update Name and Bio
