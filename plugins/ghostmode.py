@@ -545,3 +545,62 @@ async def catch_edits(event):
             
             cache_message(chat_id, event.id, event.message)
         except Exception as e: print(f"Vault Edit Error: {e}")
+
+# ── GhostRead Reply Interceptor ────────────────────────────────────────────────
+@CipherElite.on(events.NewMessage())
+async def vaultdest_reply_relay(event):
+    if not event.is_reply:
+        return
+        
+    gc = ghost_config
+    if not gc.get("ghost_read"):
+        return
+        
+    dest = gc.get("vault_dest", "me")
+    
+    # Check if this message is in the vault destination
+    try:
+        if dest == "me":
+            # If "me", the chat_id should be the userbot's own ID
+            me = await event.client.get_me()
+            if event.chat_id != me.id:
+                return
+        else:
+            if event.chat_id != int(dest):
+                return
+    except Exception:
+        return
+
+    # Ignore commands
+    if event.text and event.text.startswith("."):
+        return
+
+    # Get the replied-to message
+    reply_msg = await event.get_reply_message()
+    if not reply_msg or not reply_msg.forward:
+        return
+        
+    # Get the original sender from the forward
+    original_sender_id = None
+    if reply_msg.forward.sender_id:
+        original_sender_id = reply_msg.forward.sender_id
+    else:
+        # Sometimes Telethon sets from_id instead of sender_id
+        try:
+            original_sender_id = reply_msg.forward.from_id.user_id
+        except Exception:
+            pass
+            
+    if not original_sender_id:
+        return
+        
+    try:
+        await event.client.send_message(
+            entity=original_sender_id,
+            message=event.text,
+            file=event.media,
+            link_preview=False
+        )
+        await event.reply("✅ _Message cleanly relayed._")
+    except Exception as e:
+        await event.reply(f"❌ _Failed to relay:_ `{e}`")
