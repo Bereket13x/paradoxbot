@@ -191,7 +191,18 @@ class PersonalAssistant:
                 f"→ Reply `.da` to disapprove\n"
                 f"→ Reply `.block` to block"
             )
-            await event.client.send_message(LOG_CHAT_ID, notification_text)
+            
+            dest = LOG_CHAT_ID
+            try:
+                with open("DB/ghost_config.json", "r") as f:
+                    data = json.load(f)
+                    vd = data.get("vault_dest")
+                    if vd and vd != "me":
+                        dest = int(vd)
+            except Exception:
+                pass
+                
+            await event.client.send_message(dest, notification_text)
         except Exception as e:
             logging.error(f"Failed to send notification: {e}")
 
@@ -823,9 +834,24 @@ def init(client):
 
 
     # ── Vault Reply Interceptor ────────────────────────────────────────────────
-    @CipherElite.on(events.NewMessage(outgoing=True, chats=Config.LOG_CHAT_ID))
+    @CipherElite.on(events.NewMessage())
     async def _vault_reply(event):
         if not event.is_reply:
+            return
+            
+        # Determine valid vault chats
+        valid_chats = [Config.LOG_CHAT_ID]
+        try:
+            with open("DB/ghost_config.json", "r") as f:
+                data = json.load(f)
+                vd = data.get("vault_dest")
+                if vd and vd != "me":
+                    valid_chats.append(int(vd))
+        except Exception:
+            pass
+            
+        # Ensure this is in one of the vault chats
+        if event.chat_id not in valid_chats:
             return
             
         # Ignore commands like .a or .da
