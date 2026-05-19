@@ -52,6 +52,10 @@ MESSAGE_CACHE = {}
 MAX_CACHE_SIZE = 5000
 cache_keys = []
 
+# Mapping for GhostRead Forwards to Original Sender ID (overcomes privacy settings)
+GHOSTREAD_MAP = {}
+GHOSTREAD_KEYS = []
+
 def load_ghost_config():
     global ghost_config
     ghost_config = DEFAULT_CONFIG.copy()
@@ -446,7 +450,17 @@ async def combined_incoming_watcher(event):
         if getattr(sender, "bot", False) is False:
             try:
                 dest = gc.get("vault_dest", "me")
-                await event.client.forward_messages(dest, event.message)
+                fwd = await event.client.forward_messages(dest, event.message)
+                # Map the forwarded message ID(s) back to the sender's ID for replies
+                if fwd:
+                    global GHOSTREAD_MAP, GHOSTREAD_KEYS
+                    msgs = fwd if isinstance(fwd, list) else [fwd]
+                    for m in msgs:
+                        GHOSTREAD_MAP[m.id] = event.sender_id
+                        GHOSTREAD_KEYS.append(m.id)
+                        if len(GHOSTREAD_KEYS) > MAX_CACHE_SIZE:
+                            oldest = GHOSTREAD_KEYS.pop(0)
+                            GHOSTREAD_MAP.pop(oldest, None)
             except: pass
 
     # Anti-Seen
@@ -577,19 +591,21 @@ async def vaultdest_reply_relay(event):
 
     # Get the replied-to message
     reply_msg = await event.get_reply_message()
-    if not reply_msg or not reply_msg.forward:
+    if not reply_msg:
         return
         
-    # Get the original sender from the forward
-    original_sender_id = None
-    if reply_msg.forward.sender_id:
-        original_sender_id = reply_msg.forward.sender_id
-    else:
-        # Sometimes Telethon sets from_id instead of sender_id
-        try:
-            original_sender_id = reply_msg.forward.from_id.user_id
-        except Exception:
-            pass
+    # Get the original sender from our internal map (bypasses privacy settings)
+    original_sender_id = GHOSTREAD_MAP.get(reply_msg.id)
+    
+    # Fallback to forward tag if the bot was restarted and map was cleared
+    if not original_sender_id and reply_msg.forward:
+        if reply_msg.forward.sender_id:
+            original_sender_id = reply_msg.forward.sender_id
+        else:
+            try:
+                original_sender_id = reply_msg.forward.from_id.user_id
+            except Exception:
+                pass
             
     if not original_sender_id:
         return
