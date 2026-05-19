@@ -439,7 +439,7 @@ class PersonalAssistant:
         cfg = self.data["config"]
         texts = {
             "introduction": [
-                f"Hey **{{first_name}}**! 👋 The owner, **{cfg['alive_name']}**, isn't around right now.\n\n"
+                f"Hey **{{first_name}}**! 👋 The owner, **PARADOX**, isn't around right now.\n\n"
                 f"I'm **{cfg['assistant_name']}** ✨, your friendly Gen Z AI assistant managing this inbox! "
                 f"Drop your message below and I'll help you out, plus I'll make sure the owner sees it later. 💯\n\n"
                 f"*(Btw, if you just want to leave a message without me replying, start it with a `.`. And if you want me to speak in normal English, just tell me \"stop genz\")*"
