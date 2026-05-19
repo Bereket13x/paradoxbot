@@ -119,14 +119,14 @@ async def configure_bot_via_botfather(user_client, bot_username):
     user = await user_client.get_me()
     user_first_name = user.first_name
     
-    bot_name = f"{user_first_name}'s Assistant"
+    bot_name = "Paradox's Assistant"
     bot_bio = (
-        f"🤖 Personal Assistant Bot for {user_first_name}\n\n"
+        "🤖 Personal Assistant Bot for Paradox\n\n"
         "🔰 PARADOX Userbot Assistant\n"
         "⚡ Advanced Automation & Management\n"
         "🛡️ Personal & Secure"
     )
-    bot_about = f"🤖 Assistant for {user_first_name} | PARADOX"
+    bot_about = "🤖 Assistant for Paradox | PARADOX"
     
     desired_commands = {
         "start": "Start the bot",
