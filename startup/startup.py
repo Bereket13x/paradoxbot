@@ -13,6 +13,7 @@ from telethon.tl.functions.bots import SetBotCommandsRequest
 from telethon.tl.functions.photos import UploadProfilePhotoRequest, DeletePhotosRequest
 from telethon.tl.functions.account import UpdateProfileRequest
 from telethon.tl.functions.users import GetFullUserRequest
+from telethon.tl.types import BotCommand, BotCommandScopeDefault, BotCommandScopePeer
 
 from plugins.bot import init_bot
 from utils.utils import init_client
@@ -130,9 +131,7 @@ async def configure_bot_via_botfather(user_client, bot_username):
     
     desired_commands = {
         "start": "Start the bot",
-        "help": "Show help information",
-        "ping": "Check bot responsiveness",
-        "status": "Show system status"
+        "help": "Show help information"
     }
 
     print(f"\033[1;34m🔍 Checking current @{bot_username} settings...\033[0m")
@@ -169,16 +168,6 @@ async def configure_bot_via_botfather(user_client, bot_username):
     
     try:
         async with user_client.conversation('BotFather') as conv:
-            if needs_commands:
-                print("\033[1;36m➡️ Updating commands...\033[0m")
-                await conv.send_message("/setcommands")
-                await asyncio.sleep(1)
-                await conv.send_message(f"@{bot_username}")
-                await asyncio.sleep(1)
-                commands_str = "\n".join([f"{k} - {v}" for k, v in desired_commands.items()])
-                await conv.send_message(commands_str)
-                await asyncio.sleep(2)
-                
             if needs_name:
                 print("\033[1;36m➡️ Updating name...\033[0m")
                 await conv.send_message("/setname")
@@ -212,6 +201,46 @@ async def configure_bot_via_botfather(user_client, bot_username):
     except Exception as e:
         print(f"\033[1;31m❌ Failed to configure bot via BotFather: {e}\033[0m")
         print("\033[1;33m⚠️ Please configure bot manually through @BotFather if necessary.\033[0m")
+        return False
+
+async def configure_bot_commands(bot_client, user_client):
+    """Set scoped commands so only the owner sees admin commands"""
+    print("\033[1;34m🔍 Updating bot command scopes...\033[0m")
+    try:
+        user = await user_client.get_me()
+        try:
+            user_peer = await bot_client.get_input_entity(user.id)
+        except Exception:
+            # If bot hasn't seen the user yet, send a message to cache the entity
+            await bot_client.send_message(user.id, "Initialization...")
+            user_peer = await bot_client.get_input_entity(user.id)
+            
+        # 1. Global commands (everyone)
+        await bot_client(SetBotCommandsRequest(
+            scope=BotCommandScopeDefault(),
+            lang_code='',
+            commands=[
+                BotCommand(command="start", description="Start the bot"),
+                BotCommand(command="help", description="Show help information")
+            ]
+        ))
+        
+        # 2. Owner-only commands
+        await bot_client(SetBotCommandsRequest(
+            scope=BotCommandScopePeer(user_peer),
+            lang_code='',
+            commands=[
+                BotCommand(command="start", description="Start the bot"),
+                BotCommand(command="help", description="Show help information"),
+                BotCommand(command="ping", description="Check bot responsiveness"),
+                BotCommand(command="status", description="Show system status"),
+                BotCommand(command="assistant", description="Manage assistant settings")
+            ]
+        ))
+        print("\033[1;32m✅ Bot commands successfully scoped and updated\033[0m")
+        return True
+    except Exception as e:
+        print(f"\033[1;31m❌ Failed to set bot command scopes: {e}\033[0m")
         return False
 
 async def update_bot_profile_picture(bot_client, user_client):
@@ -375,6 +404,8 @@ async def start_bot(client):
         
         print("\033[1;33m🔄 Configuring bot via BotFather...\033[0m")
         await configure_bot_via_botfather(client, bot_me.username)
+        
+        await configure_bot_commands(bot, client)
         
         print("\033[1;33m🔄 Updating bot profile picture...\033[0m")
         await update_bot_profile_picture(bot, client)

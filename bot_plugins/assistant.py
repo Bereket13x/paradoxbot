@@ -250,4 +250,38 @@ def init_bot_plugin(bot, owner_id, owner_name):
         await event.reply(text)
 
 
+    # ─────────────────────────────────────────
+    # PING / STATUS
+    # ─────────────────────────────────────────
+    @bot.on(events.NewMessage(pattern=r"^/ping$"))
+    async def ping_cmd(event):
+        if is_handled(event): return
+        mark_handled(event)
+        if event.sender_id != owner_user_id: return
+        
+        import time
+        start = time.time()
+        msg = await event.reply("Pong!")
+        end = time.time()
+        await msg.edit(f"🏓 **Pong!**\nLatency: `{round((end - start) * 1000)}ms`")
+
+    @bot.on(events.NewMessage(pattern=r"^/status$"))
+    async def status_cmd(event):
+        if is_handled(event): return
+        mark_handled(event)
+        if event.sender_id != owner_user_id: return
+        
+        db = load_db()
+        status = "🟢 ON" if db["assistant_enabled"] else "🔴 OFF"
+        stats = db.get("stats", {})
+        
+        text = (
+            "🛠 **Assistant Status**\n\n"
+            f"**State**: {status}\n"
+            f"**Messages Forwarded**: `{stats.get('messages', 0)}`\n"
+            f"**Owner Replies**: `{stats.get('replies', 0)}`\n"
+            "**System**: `Online & Stable`"
+        )
+        await event.reply(text)
+
     print("🚀 Assistant Ready (No Duplication Mode)")
