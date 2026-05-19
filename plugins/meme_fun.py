@@ -82,15 +82,17 @@ def save_as_webp(img):
     return output
 
 async def run_inline_bot(event, bot_username, query):
-    catevent = await event.edit("`Contacting bot...`")
+    msg = await event.edit("`Contacting bot...`")
     try:
         results = await event.client.inline_query(bot_username, query)
         if not results:
-            return await catevent.edit("`No response from bot.`")
-        await results[0].click(event.chat_id, reply_to=event.reply_to_msg_id)
-        await catevent.delete()
+            return await msg.edit("`No response from bot.`")
+        
+        # hide_via=True removes the "via @bot" tag by sending the media directly
+        await results[0].click(event.chat_id, reply_to=event.reply_to_msg_id, hide_via=True)
+        await msg.delete()
     except Exception as e:
-        await catevent.edit(f"**Error:** `{e}`")
+        await msg.edit(f"**Error:** `{e}`")
 
 
 # ================== INLINE BOTS ==================
