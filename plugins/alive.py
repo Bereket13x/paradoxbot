@@ -211,8 +211,10 @@ async def alive(event):
 @rishabh()
 async def ping(event):
     start = datetime.now()
-    # Note: speed calculation is slightly off with inline, but acceptable
-    elapsed = (datetime.now() - start).microseconds // 1000
+    ping_msg = await event.reply("`...`")
+    end = datetime.now()
+    elapsed = int((end - start).total_seconds() * 1000)
+    
     uptime = get_readable_time((datetime.now() - START_TIME).total_seconds())
     template = (
         user_config.custom_ping_text
@@ -233,7 +235,9 @@ async def ping(event):
             hide_via=True
         )
         await event.delete()
+        await ping_msg.delete()
     except Exception:
+        await ping_msg.delete()
         await event.reply(text, file=INLINE_DATA["ping_media"])
 
 # ============================================================================
