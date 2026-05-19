@@ -151,22 +151,31 @@ async def delall(event):
     deleted_count = 0
 
     try:
-        async for message in CipherElite.iter_messages(
-            event.chat_id,
-            from_user=target_user,
-            reverse=True  # Process oldest first to avoid gaps
-        ):
-            if message.id == warning_msg.id:
-                continue  # Skip our own warning message
-                
-            try:
-                await message.delete()
-                deleted_count += 1
-                # Small delay to avoid flood limits
-                if deleted_count % 10 == 0:
-                    await asyncio.sleep(0.5)
-            except Exception:
-                pass
+        if not target_user:
+            from telethon.tl.functions.messages import DeleteHistoryRequest
+            await CipherElite(DeleteHistoryRequest(
+                peer=event.chat_id,
+                max_id=0,
+                just_clear=False,
+                revoke=True
+            ))
+            deleted_count = "all"
+        else:
+            async for message in CipherElite.iter_messages(
+                event.chat_id,
+                from_user=target_user,
+                reverse=True
+            ):
+                if message.id == warning_msg.id:
+                    continue
+                    
+                try:
+                    await message.delete(revoke=True)
+                    deleted_count += 1
+                    if deleted_count % 10 == 0:
+                        await asyncio.sleep(0.5)
+                except Exception:
+                    pass
     except Exception as e:
         await warning_msg.edit(f"❌ Error: {str(e)}")
         await asyncio.sleep(5)
