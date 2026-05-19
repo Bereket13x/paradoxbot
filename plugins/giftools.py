@@ -62,8 +62,7 @@ async def register_commands():
                             # Send the GIF
                             await event.client.send_file(
                                 event.chat_id,
-                                gif_url,
-                                caption=f"🎞️ {query}"
+                                gif_url
                             )
                             
                             await msg.delete()

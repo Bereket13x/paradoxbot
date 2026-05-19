@@ -137,7 +137,7 @@ async def stcr(event):
     if not sticktext:
         return await event.edit("`Need text to write..`")
         
-    await event.edit("`Creating sticker...`")
+    msg = await event.edit("`Creating sticker...`")
     RGB = tuple(random.sample(range(255), 3))
     
     sticktext = "\n".join(textwrap.wrap(sticktext, width=10))
@@ -176,7 +176,7 @@ async def stcr(event):
     
     stream = save_as_webp(image)
     await event.client.send_file(event.chat_id, stream, reply_to=event.reply_to_msg_id, force_document=False)
-    await event.delete()
+    await msg.delete()
 
 
 @CipherElite.on(events.NewMessage(pattern=r"\.(quby|blob|kirby|doge|penguin|gandhi)(?:\s+(.+))?"))
@@ -190,7 +190,7 @@ async def meme_sticker_handler(event):
     if not text:
         return await event.edit(f"`What is {cmd} supposed to say?`")
         
-    await event.edit("`Wait, processing.....`")
+    msg = await event.edit("`Wait, processing.....`")
     
     # Template configurations
     templates = {
@@ -241,8 +241,8 @@ async def meme_sticker_handler(event):
         
         stream = save_as_webp(final_img)
         await event.client.send_file(event.chat_id, stream, reply_to=event.reply_to_msg_id, force_document=False)
-        await event.delete()
+        await msg.delete()
         
     except Exception as e:
-        await event.edit(f"**Error:** `{e}`")
+        await msg.edit(f"**Error:** `{e}`")
 
