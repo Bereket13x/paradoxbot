@@ -1,0 +1,35 @@
+# === Core Bot Framework ===
+Telethon==1.37.0
+python-dotenv==1.0.1
+cryptography==44.0.2
+
+# === AI Integrations ===
+openai==1.68.2
+google-generativeai==0.8.6
+
+# === HTTP / Networking ===
+aiohttp==3.11.11
+aiofiles==24.1.0
+requests==2.32.3
+requests-toolbelt==1.0.0
+
+# === Web Scraping & Parsing ===
+beautifulsoup4==4.12.3
+lxml>=5.0.0
+html5lib==1.1
+urlextract
+
+# === Media & Image Processing ===
+pillow==11.1.0
+qrcode
+yt-dlp
+shazamio
+
+# === Telegraph Plugin ===
+telegraph
+
+# === Twitter / X Integration ===
+twscrape
+
+# === System Tools ===
+psutil==6.1.1

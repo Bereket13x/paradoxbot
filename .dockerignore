@@ -1,0 +1,14 @@
+.git
+.github
+__pycache__
+*.pyc
+.env
+bot.log
+session.journal
+*.session
+scratch/
+test_*.py
+images/1765442191944.jpg
+CONTRIBUTORS.md
+LICENSE
+*.md
