@@ -822,6 +822,42 @@ def init(client):
             await event.reply("ℹ️ This user has no active warn.")
 
 
+    # ── Vault Reply Interceptor ────────────────────────────────────────────────
+    @CipherElite.on(events.NewMessage(outgoing=True, chats=Config.LOG_CHAT_ID))
+    async def _vault_reply(event):
+        if not event.is_reply:
+            return
+            
+        # Ignore commands like .a or .da
+        if event.text and event.text.startswith("."):
+            return
+            
+        reply_msg = await event.get_reply_message()
+        if not reply_msg or not reply_msg.text:
+            return
+            
+        import re
+        # Look for the user ID format in the notification template
+        match = re.search(r"🆔 \*\*User ID:\*\* `(\d+)`", reply_msg.text)
+        if not match:
+            return
+            
+        user_id = int(match.group(1))
+        
+        try:
+            # Send message cleanly to the user without any forward tags
+            await event.client.send_message(
+                entity=user_id,
+                message=event.text,
+                file=event.media,
+                link_preview=False
+            )
+            # Confirm in the vault
+            await event.reply("✅ _Message sent cleanly to user._")
+        except Exception as e:
+            await event.reply(f"❌ _Failed to send to user:_ `{e}`")
+
+
     print(
         f"✅ PM Permit Plugin initialized (pmpermit_enabled={assistant.data['config'].get('pmpermit_enabled', True)})"
     )
