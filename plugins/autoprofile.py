@@ -7,6 +7,7 @@
 import asyncio
 import os
 import ssl
+import time
 import urllib.request
 import json
 from datetime import datetime, timedelta
@@ -390,7 +391,7 @@ async def loop_autoname(client):
             await asyncio.sleep(e.seconds)
         except Exception:
             pass
-        await asyncio.sleep(60)
+        await asyncio.sleep(60 - (time.time() % 60))
 
 async def loop_autobio(client):
     while RUNNING_TASKS["autobio"]["running"]:
@@ -418,7 +419,7 @@ async def loop_autobio(client):
             await asyncio.sleep(e.seconds)
         except Exception:
             pass
-        await asyncio.sleep(60)
+        await asyncio.sleep(60 - (time.time() % 60))
 
 async def loop_digitalpfp(client):
     while RUNNING_TASKS["digitalpfp"]["running"]:
@@ -459,7 +460,7 @@ async def loop_digitalpfp(client):
             await notify_user(client, f"❌ **PFP Error:** `{str(e)}`\nRetrying in 3 minutes...")
             await asyncio.sleep(180)
             continue
-        await asyncio.sleep(180)
+        await asyncio.sleep(300 - (time.time() % 300))
 
 async def loop_forgepfp(client):
     while RUNNING_TASKS["forgepfp"]["running"]:
@@ -531,7 +532,7 @@ async def loop_forgepfp(client):
             await notify_user(client, f"❌ **Forge PFP Error:** `{str(e)}`\nRetrying in 5 minutes...")
             await asyncio.sleep(300)
             continue
-        await asyncio.sleep(300)
+        await asyncio.sleep(300 - (time.time() % 300))
 
 async def loop_status(client):
     while RUNNING_TASKS["status"]["active"]:
