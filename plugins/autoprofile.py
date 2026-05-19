@@ -390,7 +390,7 @@ async def loop_autoname(client):
             await asyncio.sleep(e.seconds)
         except Exception:
             pass
-        await asyncio.sleep(300)
+        await asyncio.sleep(60)
 
 async def loop_autobio(client):
     while RUNNING_TASKS["autobio"]["running"]:
@@ -418,7 +418,7 @@ async def loop_autobio(client):
             await asyncio.sleep(e.seconds)
         except Exception:
             pass
-        await asyncio.sleep(300)
+        await asyncio.sleep(60)
 
 async def loop_digitalpfp(client):
     while RUNNING_TASKS["digitalpfp"]["running"]:
