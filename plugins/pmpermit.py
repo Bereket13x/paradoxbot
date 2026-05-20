@@ -599,12 +599,18 @@ class PersonalAssistant:
                 return
 
             try:
-                temp_msg = await event.reply("✨ *Let me cook...* 🍳")
-                response_text = await self.get_ai_response(uid, msg_text or "(no text)")
+                from plugins.paradox_ai import TYPING_FRAMES, run_typing_animation
+                temp_msg = await event.reply(TYPING_FRAMES[0])
+                ai_task = asyncio.create_task(self.get_ai_response(uid, msg_text or "(no text)"))
+                asyncio.create_task(run_typing_animation(temp_msg, ai_task))
+                response_text = await ai_task
                 await temp_msg.edit(response_text)
             except Exception as e:
                 logging.error(f"AI Error: {e}")
-                await temp_msg.edit(f"❌ **AI Error:** {str(e)}\n\n⏳ *Apologies, the assistant is momentarily unavailable.*")
+                try:
+                    await temp_msg.edit(f"❌ **AI Error:** {str(e)}\n\n⏳ *Apologies, the assistant is momentarily unavailable.*")
+                except Exception:
+                    pass
             return
 
 

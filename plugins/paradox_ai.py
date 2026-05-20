@@ -29,6 +29,32 @@ conversation_history: dict = {}
 AUTO_AI_STATE = "OFF"   # "OFF" | "ALL"
 
 
+# ── Typing animation frames ───────────────────────────────────────────────
+TYPING_FRAMES = [
+    "⠋ *Thinking...*",
+    "⠙ *Thinking...*",
+    "⠹ *Thinking...*",
+    "⠸ *Thinking...*",
+    "⠼ *Thinking...*",
+    "⠴ *Thinking...*",
+    "⠦ *Thinking...*",
+    "⠧ *Thinking...*",
+    "⠇ *Thinking...*",
+    "⠏ *Thinking...*",
+]
+
+async def run_typing_animation(msg, task: asyncio.Task, interval=0.6):
+    """Edit `msg` with spinning frames until `task` completes."""
+    i = 0
+    while not task.done():
+        try:
+            await msg.edit(TYPING_FRAMES[i % len(TYPING_FRAMES)])
+        except Exception:
+            pass
+        i += 1
+        await asyncio.sleep(interval)
+
+
 # ══════════════════════════════════════════════════════════════════════════
 #  Helpers
 # ══════════════════════════════════════════════════════════════════════════
@@ -189,7 +215,9 @@ async def auto_reply_handler(event):
         text = event.text or ""
         # Ignore pmpermit's and paradox's own automated messages
         if text.startswith((
-            "✨ *Let me cook",
+            "⠋ *Thinking",
+            "⠙ *Thinking",
+            "⠹ *Thinking",
             "Hello **",
             "❌ Your access",
             "✅ You have been",
@@ -243,11 +271,12 @@ async def auto_reply_handler(event):
         conversation_history[chat_id] = [get_system_prompt()] + conversation_history[chat_id][-4:]
 
     try:
-        thinking_msg = await event.respond("✨ *Let me cook...* 🍳")
+        thinking_msg = await event.respond(TYPING_FRAMES[0])
 
         api_task = asyncio.create_task(
             asyncio.wait_for(make_ai_request(conversation_history[chat_id]), timeout=30.0)
         )
+        asyncio.create_task(run_typing_animation(thinking_msg, api_task))
 
         try:
             response = await api_task
@@ -257,7 +286,6 @@ async def auto_reply_handler(event):
         if not str(response).startswith(("❌", "⏳")):
             conversation_history[chat_id].append({"role": "assistant", "content": str(response)})
         
-        # Always edit the message with the response (even if it's an error) so the owner can debug it
         await thinking_msg.edit(str(response))
     except Exception:
         pass
@@ -302,8 +330,6 @@ async def ai_handler(event):
             await event.reply("📝 **Query too long!** Keep it under 2000 characters.")
             return
 
-        thinking_msg = await event.respond("✨ *Let me cook...* 🍳")
-
         chat_id = event.chat_id
         if chat_id not in conversation_history:
             conversation_history[chat_id] = [get_system_prompt()]
@@ -312,12 +338,14 @@ async def ai_handler(event):
         if len(conversation_history[chat_id]) > 6:
             conversation_history[chat_id] = [get_system_prompt()] + conversation_history[chat_id][-5:]
 
-        api_task = asyncio.create_task(
+        thinking_msg = await event.respond(TYPING_FRAMES[0])
+        api_task_ref = asyncio.create_task(
             asyncio.wait_for(make_ai_request(conversation_history[chat_id]), timeout=45.0)
         )
+        asyncio.create_task(run_typing_animation(thinking_msg, api_task_ref))
 
         try:
-            response = await api_task
+            response = await api_task_ref
         except asyncio.TimeoutError:
             response = "⏰ **Timeout:** AI took too long. Try a shorter question."
 
