@@ -27,7 +27,7 @@ def init(client_instance):
     commands = [
         ".setstory <reply media> [caption] [-contacts] - Set replied media as your story",
         ".storydl <username / reply / link> - Download user stories stealthily",
-        ".delstory <id> - Delete your story by ID",
+        ".delstory <id> or last - Delete your story by ID or your most recent one",
     ]
     description = "🎭 Story Tools - Upload, Download, & Manage Telegram Stories Stealthily"
     add_handler("story", commands, description)
@@ -205,16 +205,23 @@ async def story_download(event):
 
 # ================= DELETE STORY ================= #
 
-@CipherElite.on(events.NewMessage(outgoing=True, pattern=r"\.delstory(?:\s+(\d+))?$"))
+@CipherElite.on(events.NewMessage(outgoing=True, pattern=r"(?i)\.delstory(?:\s+(last|\d+))?$"))
 @rishabh()
 async def del_story(event):
     try:
-        story_id = event.pattern_match.group(1)
-        if not story_id:
-            return await event.reply("❌ **Usage:** `.delstory <story_id>`")
+        story_arg = event.pattern_match.group(1)
+        if not story_arg:
+            return await event.reply("❌ **Usage:** `.delstory <story_id>` or `.delstory last`")
 
-        story_id = int(story_id)
         status = await event.reply("🔄 **Deleting story...** 🗑️")
+
+        if story_arg.lower() == "last":
+            full = (await event.client(GetFullUserRequest("me"))).full_user
+            if not full.stories or not full.stories.stories:
+                return await status.edit("❌ **You have no active stories to delete!**")
+            story_id = full.stories.stories[-1].id
+        else:
+            story_id = int(story_arg)
 
         await event.client(
             DeleteStoriesRequest(
