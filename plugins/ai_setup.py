@@ -96,7 +96,7 @@ class AIConfigManager:
         self._save()
 
     def set_provider(self, provider: str):
-        if provider.lower() in ("nvidia", "gemini"):
+        if provider.lower() in ("nvidia", "gemini", "llama"):
             self.config["active_provider"] = provider.lower()
             os.environ["ACTIVE_PROVIDER"] = provider.lower()
             self._update_enabled()
@@ -243,10 +243,10 @@ def init(client):
             f"📝 **Commands:**\n"
             f"• `.setai <key>` — Set Gemini key\n"
             f"• `.setnai <key>` — Set NVIDIA key\n"
-            f"• `.paimode nvidia/gemini` — Switch provider\n"
+            f"• `.paimode nvidia/gemini/llama` — Switch provider\n"
             f"• `.rmai` — Remove all keys\n\n"
             f"🔗 Gemini: https://aistudio.google.com/\n"
-            f"🔗 NVIDIA: https://build.nvidia.com/"
+            f"🔗 NVIDIA (Mistral/LLaMA): https://build.nvidia.com/"
         )
 
     print("✅ AI Setup Plugin initialized")

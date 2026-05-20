@@ -108,6 +108,10 @@ class PersonalAssistant:
                 self.client = AsyncOpenAI(base_url="https://generativelanguage.googleapis.com/v1beta/openai/", api_key=gemini_key)
                 self.model_name = "gemini-2.0-flash"
                 return True
+            elif provider == "llama" and nvidia_key:
+                self.client = AsyncOpenAI(base_url="https://integrate.api.nvidia.com/v1", api_key=nvidia_key)
+                self.model_name = "meta/llama-3.1-70b-instruct"
+                return True
             elif nvidia_key:
                 self.client = AsyncOpenAI(base_url="https://integrate.api.nvidia.com/v1", api_key=nvidia_key)
                 self.model_name = "mistralai/mistral-nemotron"

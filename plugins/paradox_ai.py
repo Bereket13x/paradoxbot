@@ -57,6 +57,8 @@ def _build_client(provider: str, nvidia_key: str | None, gemini_key: str | None)
     """Return (AsyncOpenAI client, model_name) for the active provider."""
     if provider == "gemini" and gemini_key:
         return AsyncOpenAI(base_url=GEMINI_BASE_URL, api_key=gemini_key), GEMINI_DEFAULT_MODEL
+    if provider == "llama" and nvidia_key:
+        return AsyncOpenAI(base_url=NVIDIA_BASE_URL, api_key=nvidia_key), "meta/llama-3.1-70b-instruct"
     if nvidia_key:
         return AsyncOpenAI(base_url=NVIDIA_BASE_URL, api_key=nvidia_key), NVIDIA_DEFAULT_MODEL
     return None, None
@@ -400,20 +402,22 @@ async def aigemini_handler(event):
 #  .paimode — Switch provider
 # ══════════════════════════════════════════════════════════════════════════
 
-@CipherElite.on(events.NewMessage(pattern=r"(?i)\.paimode(?:\s+(nvidia|gemini))?"))
+@CipherElite.on(events.NewMessage(pattern=r"(?i)\.paimode(?:\s+(nvidia|gemini|llama))?"))
 @rishabh()
-async def aimode_handler(event):
+async def paimode_handler(event):
     try:
         from plugins.ai_setup import ai_config
-        mode = event.pattern_match.group(1)
-        if not mode:
+        new_mode = event.pattern_match.group(1)
+        
+        if not new_mode:
+            current = ai_config.get_provider()
             await event.reply(
-                f"⚙️ **Usage:** `.paimode nvidia` or `.paimode gemini`\n\n"
-                f"Current provider: **{ai_config.get_provider().upper()}**"
+                f"⚙️ **Usage:** `.paimode nvidia` | `.paimode gemini` | `.paimode llama`\n\n"
+                f"Currently using: `{current.upper()}`"
             )
             return
-        ai_config.set_provider(mode.lower())
-        await event.reply(f"✅ **AI Provider switched to: {mode.upper()}**")
+        ai_config.set_provider(new_mode.lower())
+        await event.reply(f"✅ **AI Provider switched to: {new_mode.upper()}**")
     except Exception as e:
         await event.reply(f"❌ **Error:** {str(e)}")
 
