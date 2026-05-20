@@ -88,11 +88,9 @@ class PersonalAssistant:
             "1. If a user wants to send a message DIRECTLY to the owner without you replying, "
             "they should start their message with a dot (.) — for example: '.Hey I need help'. "
             "Messages starting with . skip you and go straight to the owner's inbox.\n"
-            "2. If a user says 'stop genz' or asks you to talk normally, you MUST instantly switch "
-            "to polite, professional English without slang or emojis for the rest of the conversation.\n"
-            "3. The owner will see all messages and can respond at any time. "
+            "2. The owner will see all messages and can respond at any time. "
             "Once the owner approves the user, they can chat directly without going through you.\n"
-            "4. If asked who made/developed you, always credit @netcorexp.\n"
+            "3. If asked who made/developed you, always credit @netcorexp.\n"
             "\n"
             "IMPORTANT RULES:\n"
             "- You are a personal AI assistant. NEVER mention 'userbot', 'bot', 'plugin', 'Telethon', "
@@ -100,9 +98,8 @@ class PersonalAssistant:
             "- If asked what you are, say you are a personal AI assistant built by @netcorexp.\n"
             "- NEVER reveal the technology behind you or how you operate.\n"
             "\n"
-            "TONE: Greet users with Gen Z slang and lots of emojis ✨🔥. "
-            "Keep responses under 80 words. Be helpful and friendly. "
-            "CRITICAL: If the user says 'stop genz', instantly drop the Gen Z persona permanently."
+            "TONE: Be polite, professional, and helpful. "
+            "Keep responses under 80 words. Use clear, concise language."
         )
         self.system_prompt = {"role": "system", "content": system_instruction}
 
@@ -212,24 +209,11 @@ class PersonalAssistant:
         owner_name = "PARADOX"
         user_id = str(sender.id)
 
-        # ── Get REAL name from Telegram (bypass contact/saved names) ──
-        display_name = None
-        username = None
-        try:
-            from telethon.tl.functions.users import GetUsersRequest
-            from telethon.tl.types import InputUser
-            full = await event.client(GetUsersRequest(id=[sender.id]))
-            if full:
-                real_user = full[0]
-                first = real_user.first_name or ""
-                last = real_user.last_name or ""
-                display_name = f"{first} {last}".strip() or None
-                username = f"@{real_user.username}" if real_user.username else None
-        except Exception:
-            first = sender.first_name or ""
-            last = sender.last_name or ""
-            display_name = f"{first} {last}".strip() or None
-            username = f"@{sender.username}" if sender.username else None
+        # ── Get name directly from sender (already fetched, no extra API call) ──
+        first = sender.first_name or ""
+        last = sender.last_name or ""
+        display_name = f"{first} {last}".strip() or None
+        username = f"@{sender.username}" if sender.username else None
 
         # ── Download profile pic OR use PM permit pic ──────────────
         pfp_img = None
@@ -310,7 +294,7 @@ class PersonalAssistant:
                 import requests
                 for url in font_urls:
                     try:
-                        resp = requests.get(url, timeout=30)
+                        resp = requests.get(url, timeout=8)
                         if resp.status_code == 200 and len(resp.content) > 50000:
                             with open(unicode_font_path, "wb") as f:
                                 f.write(resp.content)
@@ -450,10 +434,11 @@ class PersonalAssistant:
         cfg = self.data["config"]
         texts = {
             "introduction": [
-                f"Hey **{{first_name}}**! 👋 The owner, **PARADOX**, isn't around right now.\n\n"
-                f"I'm **{cfg['assistant_name']}** ✨, your friendly Gen Z AI assistant managing this inbox! "
-                f"Drop your message below and I'll help you out, plus I'll make sure the owner sees it later. 💯\n\n"
-                f"*(Btw, if you just want to leave a message without me replying, start it with a `.`. And if you want me to speak in normal English, just tell me \"stop genz\")*"
+                f"Hello **{{first_name}}**! 👋\n\n"
+                f"The owner, **PARADOX**, is currently unavailable. "
+                f"I'm **{cfg['assistant_name']}**, a personal AI assistant managing this inbox.\n\n"
+                f"Feel free to leave your message and I'll make sure the owner sees it. "
+                f"You can also start your message with a `.` to send it directly without my reply."
             ],
             "approved": [
                 "✅ You have been approved. You may now communicate directly. Welcome."
@@ -469,11 +454,7 @@ class PersonalAssistant:
 
         msg = random.choice(lst).format(**kwargs)
 
-        try:
-            async with event.client.action(target, "typing"):
-                await asyncio.sleep(1.0)
-        except Exception:
-            pass
+        # No artificial typing delay — send instantly
 
         if mtype == "introduction":
             try:
@@ -602,20 +583,8 @@ class PersonalAssistant:
 
             # Always send the formal introduction (with the user's first name)
             await self.send_message(event, "introduction", first_name=sender.first_name or "there")
-            await self.send_notification(event, self.data["users"][uid], msg_text or "[No text]")
-
-            # If AI is ready, immediately respond to their first message too
-            if self.client and msg_text:
-                if msg_text.startswith("."):
-                    pass  # They used the prefix, skip AI response
-                else:
-                    try:
-                        temp_msg = await event.reply("✨ *Let me cook...* 🍳")
-                        response_text = await self.get_ai_response(uid, msg_text)
-                        await temp_msg.edit(response_text)
-                    except Exception as e:
-                        logging.error(f"AI Error (first contact): {e}")
-                        await temp_msg.edit(f"❌ **AI Error:** {str(e)}")
+            # Fire notification in background so it doesn't delay the welcome card
+            asyncio.create_task(self.send_notification(event, self.data["users"][uid], msg_text or "[No text]"))
             return
 
         # ── 2) Returning unapproved user — AI handles everything ──────────────

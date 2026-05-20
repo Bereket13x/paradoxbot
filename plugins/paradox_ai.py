@@ -188,7 +188,7 @@ async def auto_reply_handler(event):
         # Ignore pmpermit's and paradox's own automated messages
         if text.startswith((
             "✨ *Let me cook",
-            "Hey **",
+            "Hello **",
             "❌ Your access",
             "✅ You have been",
             "🤖 **PARADOX",
