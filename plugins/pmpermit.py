@@ -110,7 +110,7 @@ class PersonalAssistant:
                 return True
             elif nvidia_key:
                 self.client = AsyncOpenAI(base_url="https://integrate.api.nvidia.com/v1", api_key=nvidia_key)
-                self.model_name = "meta/llama-3.1-70b-instruct"
+                self.model_name = "mistralai/mistral-nemotron"
                 return True
             
             self.client = None

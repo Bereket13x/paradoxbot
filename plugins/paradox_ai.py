@@ -19,7 +19,7 @@ from plugins.bot import add_handler
 
 # ── Provider constants ─────────────────────────────────────────────────────
 NVIDIA_BASE_URL    = "https://integrate.api.nvidia.com/v1"
-NVIDIA_DEFAULT_MODEL = "meta/llama-3.1-70b-instruct"
+NVIDIA_DEFAULT_MODEL = "mistralai/mistral-nemotron"
 
 GEMINI_BASE_URL    = "https://generativelanguage.googleapis.com/v1beta/openai/"
 GEMINI_DEFAULT_MODEL = "gemini-2.0-flash"

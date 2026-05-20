@@ -197,7 +197,7 @@ def init(client):
         msg = await event.reply(
             "✅ **NVIDIA API Key saved!**\n\n"
             "🤖 PARADOX AI is now **ACTIVE** for NVIDIA.\n"
-            "⚡ Model: `meta/llama-3.1-70b-instruct`\n"
+            "⚡ Model: `mistralai/mistral-nemotron`\n"
             "🔑 Use `.paimode nvidia` to switch to it."
         )
         await asyncio.sleep(5)
