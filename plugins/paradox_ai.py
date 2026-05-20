@@ -45,10 +45,8 @@ def get_system_prompt() -> dict:
             "If the user explicitly asks you to be brief, answer as briefly as possible. "
             "Return only the final result without any thinking process, internal deliberations, or <think> blocks. "
             "Avoid technical model details or markdown unless absolutely necessary. "
-            "IMPORTANT LANGUAGE RULE: You must communicate ONLY in English, Amharic, or Indian languages (like Hindi). "
-            "If communicating in Amharic, ensure your vocabulary and grammar are strictly native, highly fluent, and conversational. "
-            "If you receive a prompt in ANY other language not listed above, refuse and reply EXACTLY: "
-            "'Can you tell me what you want in English or something'."
+            "IMPORTANT LANGUAGE RULE: You must communicate ONLY in English. "
+            "If the user speaks to you in any other language, you must still reply in English."
         )
     }
 
