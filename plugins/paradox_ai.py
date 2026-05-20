@@ -440,7 +440,11 @@ async def aitest_handler(event):
             {"role": "user", "content": "Say 'Hello, I am PARADOX AI!' in exactly those words."}
         ]
 
-        response = await asyncio.wait_for(make_ai_request(test_messages), timeout=20.0)
+        try:
+            response = await asyncio.wait_for(make_ai_request(test_messages), timeout=30.0)
+        except asyncio.TimeoutError:
+            await test_msg.edit("❌ **Test Failed:**\n\n⏰ **Timeout:** The AI server took too long to respond (>30s).")
+            return
 
         if response.startswith(("❌", "⏳")):
             await test_msg.edit(f"❌ **Test Failed:**\n\n{response}")
