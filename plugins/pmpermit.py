@@ -588,7 +588,7 @@ class PersonalAssistant:
             return
 
         # ── 2) Returning unapproved user — AI handles everything ──────────────
-        if self.client:
+        if self.client and self.data["config"].get("pmresponder_enabled", True):
             if msg_text.startswith("."):
                 return
 
@@ -621,6 +621,7 @@ def init(client):
         ".pmreset             — Reset all users (everyone gets re-introduced)",
         ".pmwarn <n>          — Set message limit for user (use in PM chat)",
         ".pmunwarn            — Remove warn from user (use in PM chat)",
+        ".pmresponder on|off  — Enable/disable the AI responder for unapproved users",
     ]
     add_handler("pmpermit", commands, "Personal Assistant PM Manager")
 
@@ -800,6 +801,22 @@ def init(client):
             await event.reply("✅ **Warn removed.** AI is back on for this user.")
         else:
             await event.reply("ℹ️ This user has no active warn.")
+
+
+    @CipherElite.on(events.NewMessage(outgoing=True, pattern=r"\.pmresponder(?:$|\s)(on|off)?"))
+    @rishabh()
+    async def _toggle_pmresponder(event):
+        arg = (event.pattern_match.group(1) or "").lower()
+        cfg = assistant.data["config"]
+
+        if arg in ("on", "off"):
+            cfg["pmresponder_enabled"] = arg == "on"
+            assistant._save()
+            state = "enabled ✅" if cfg["pmresponder_enabled"] else "disabled 🚫"
+            return await event.reply(f"PM Permit AI Responder is now {state}")
+
+        state = "ON ✅" if cfg.get("pmresponder_enabled", True) else "OFF 🚫"
+        await event.reply(f"PM Permit AI Responder is currently {state}\nUsage: `.pmresponder on` or `.pmresponder off`")
 
 
     # ── Vault Reply Interceptor ────────────────────────────────────────────────
