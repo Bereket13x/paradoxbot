@@ -101,7 +101,7 @@ class PersonalAssistant:
             "refuse and reply EXACTLY: 'I can only communicate in English. Please message me in English.'\n"
             "\n"
             "TONE: Be polite, professional, and helpful. Use stunning, appropriate emojis ✨ to make your messages look engaging and polished. "
-            "Keep responses under 80 words. Use clear, concise language."
+            "Keep responses under 80 words by default, UNLESS the user explicitly asks for a detailed explanation, a long answer, or requests more information—in that case, use as many words as needed. Use clear, concise language."
         )
         self.system_prompt = {"role": "system", "content": system_instruction}
 
