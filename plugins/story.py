@@ -63,6 +63,12 @@ async def set_story(event):
                 )
             )
         except Exception as upload_err:
+            error_str = str(upload_err)
+            if "STORIES_TOO_MUCH" in error_str:
+                return await status.edit("❌ **You have reached your active story limit! Please delete some stories or wait.**")
+            if "PREMIUM_ACCOUNT_REQUIRED" in error_str:
+                return await status.edit("❌ **You need a Telegram Premium account to post this story!**")
+                
             # Direct forward failed, try downloading and uploading manually
             dl_path = await reply.download_media()
             if not dl_path:
