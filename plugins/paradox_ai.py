@@ -445,6 +445,19 @@ async def paimode_handler(event):
             )
             return
         ai_config.set_provider(new_mode.lower())
+        
+        # Also reload the pmpermit client so it uses the new mode immediately
+        try:
+            from plugins.pmpermit import assistant
+            if assistant:
+                assistant._initialize_ai_client(
+                    provider=ai_config.get_provider(),
+                    nvidia_key=ai_config.get_nvidia_key(),
+                    gemini_key=ai_config.get_gemini_key()
+                )
+        except Exception:
+            pass
+            
         await event.reply(f"✅ **AI Provider switched to: {new_mode.upper()}**")
     except Exception as e:
         await event.reply(f"❌ **Error:** {str(e)}")

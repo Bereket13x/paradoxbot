@@ -464,9 +464,18 @@ class PersonalAssistant:
 
         if mtype == "introduction":
             try:
+                from plugins.paradox_ai import TYPING_FRAMES, run_typing_animation
+                thinking_msg = await event.reply(TYPING_FRAMES[0])
                 sender = await event.get_sender()
-                card_path, pfp_path = await self._generate_welcome_card(event, sender)
+
+                card_task = asyncio.create_task(self._generate_welcome_card(event, sender))
+                asyncio.create_task(run_typing_animation(thinking_msg, card_task))
+
+                card_path, pfp_path = await card_task
+                
                 await event.client.send_file(target, card_path, caption=msg)
+                await thinking_msg.delete()
+                
                 # Cleanup
                 if os.path.exists(card_path):
                     os.remove(card_path)
