@@ -13,6 +13,7 @@ from telethon.tl.functions.stories import (
     SendStoryRequest,
     GetStoriesByIDRequest,
     DeleteStoriesRequest,
+    ActivateStealthModeRequest,
 )
 from telethon.tl.functions.users import GetFullUserRequest
 from telethon.tl.functions.channels import GetFullChannelRequest
@@ -105,10 +106,16 @@ async def story_download(event):
         text = event.pattern_match.group(1)
         reply = await event.get_reply_message()
 
-        status = await event.reply("🔄 **Fetching stories stealthily...** 🕵️‍♂️")
+        status = await event.reply("🔄 **Activating stealth mode & fetching stories...** 🕵️‍♂️")
 
-        files = []
-        captions = []
+        # Activate stealth mode — hides you from viewers list
+        try:
+            await event.client(ActivateStealthModeRequest(
+                past=True,
+                future=True
+            ))
+        except Exception:
+            pass  # Stealth may be on cooldown, continue anyway
 
         # ---------- Link ----------
         if text and re.match(r"https?://t\.me/([^/]+)/s/(\d+)", text):
@@ -125,15 +132,14 @@ async def story_download(event):
             for story in result.stories:
                 dl = await event.client.download_media(story.media)
                 if dl:
-                    files.append(dl)
-                    captions.append(story.caption or "📸 *Story*")
+                    cap = story.caption or ""
+                    await event.client.send_file(
+                        event.chat_id, dl,
+                        caption=f"🎭 **Downloaded Story:**\n\n{cap}" if cap else "🎭 **Downloaded Story**"
+                    )
+                    os.remove(dl)
 
-            if files:
-                await event.client.send_file(event.chat_id, files, caption="🎭 **Downloaded Story:**\n\n" + "\n".join(captions))
-                for f in files: os.remove(f)
-                return await status.edit("✅ **Story Downloaded Successfully!**")
-            else:
-                return await status.edit("❌ **Failed to download story.**")
+            return await status.edit("✅ **Story Downloaded Successfully! (Stealth Mode)** 🕵️")
 
         # ---------- Username / Reply ----------
         if not text:
@@ -163,23 +169,27 @@ async def story_download(event):
         if not stories or not stories.stories:
             return await status.edit("❌ **No active stories found for this user!**")
 
-        await status.edit(f"🔄 **Found {len(stories.stories)} active stories! Downloading...** 📥")
+        title_name = getattr(target, 'first_name', None) or getattr(target, 'title', 'User')
+        total = len(stories.stories)
+        await status.edit(f"🔄 **Found {total} stories from {title_name}! Downloading...** 📥")
 
+        count = 0
         for story in stories.stories[:10]:  # Cap at 10 to avoid flood
             dl = await event.client.download_media(story.media)
             if dl:
-                files.append(dl)
-                captions.append(story.caption or "")
+                count += 1
+                cap = story.caption or ""
+                caption_text = (
+                    f"🎭 **{title_name}'s Story ({count}/{min(total, 10)}):**\n\n{cap}"
+                    if cap else
+                    f"🎭 **{title_name}'s Story ({count}/{min(total, 10)})**"
+                )
+                await event.client.send_file(event.chat_id, dl, caption=caption_text)
+                os.remove(dl)
+                await asyncio.sleep(0.5)  # Avoid flood
 
-        if files:
-            title_name = getattr(target, 'first_name', None) or getattr(target, 'title', 'User')
-            await event.client.send_file(
-                event.chat_id, 
-                files, 
-                caption=f"🎭 **{title_name}'s Stories:**"
-            )
-            for f in files: os.remove(f)
-            await status.delete()
+        if count > 0:
+            await status.edit(f"✅ **Downloaded {count} stories from {title_name}! (Stealth Mode)** 🕵️")
         else:
             await status.edit("❌ **Failed to download media from stories.**")
 
