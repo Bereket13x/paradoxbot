@@ -50,39 +50,40 @@ async def is_user_admin(client, chat_id, user_id):
 @rishabh()
 async def purge(event):
     """Delete messages from replied message to current message."""
-    if not event.is_reply:
-        await event.reply("Please reply to a message to start purging from there.")
+    reply = await event.get_reply_message()
+    if not reply:
+        await event.reply("❌ **Please reply to a message to start purging from there.**")
         return
 
     chat_id = event.chat_id
     user_id = event.sender_id
 
-    if not await is_user_admin(CipherElite, chat_id, user_id):
-        await event.reply("You need to be an admin to purge messages in this chat.")
-        return
+    if event.is_group or event.is_channel:
+        if not await is_user_admin(CipherElite, chat_id, user_id):
+            await event.reply("❌ **You need to be an admin to purge messages in this chat.**")
+            return
 
-    replied_msg = await event.get_reply_message()
-    start_msg_id = replied_msg.id
-    end_msg_id = event.message.id
+    start_msg_id = reply.id
+    end_msg_id = event.id
 
     if start_msg_id >= end_msg_id:
-        await event.reply("No messages to purge.")
+        await event.reply("❌ **No messages to purge.**")
         return
 
     batch_size = 100
     try:
         msg_ids = list(range(start_msg_id, end_msg_id + 1))
         for i in range(0, len(msg_ids), batch_size):
-            await CipherElite.delete_messages(chat_id, msg_ids[i:i + batch_size])
+            await CipherElite.delete_messages(chat_id, msg_ids[i:i + batch_size], revoke=True)
             await asyncio.sleep(0.5)
 
-        confirmation = await event.reply("Purge completed successfully!")
-        await asyncio.sleep(5)
+        confirmation = await event.respond("✅ **Purge completed successfully!**")
+        await asyncio.sleep(3)
         await confirmation.delete()
     except RPCError as e:
-        await event.reply(f"Error during purge: {str(e)}")
+        await event.reply(f"❌ **Error during purge:** `{str(e)}`")
     except Exception as e:
-        await event.reply(f"An unexpected error occurred: {str(e)}")
+        await event.reply(f"❌ **An unexpected error occurred:** `{str(e)}`")
 
 # Global dictionary to track cancellation flags
 cancellation_flags = {}
