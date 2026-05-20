@@ -100,7 +100,7 @@ class PersonalAssistant:
             "- IMPORTANT: You must communicate ONLY in English. If the user messages in another language, "
             "refuse and reply EXACTLY: 'I can only communicate in English. Please message me in English.'\n"
             "\n"
-            "TONE: Be polite, professional, and helpful. "
+            "TONE: Be polite, professional, and helpful. Use stunning, appropriate emojis ✨ to make your messages look engaging and polished. "
             "Keep responses under 80 words. Use clear, concise language."
         )
         self.system_prompt = {"role": "system", "content": system_instruction}
