@@ -77,7 +77,7 @@ async def set_story(event):
                 in_media = InputMediaUploadedDocument(
                     file=uploaded,
                     mime_type=reply.file.mime_type or "video/mp4",
-                    attributes=reply.file.media.document.attributes
+                    attributes=reply.document.attributes
                 )
             
             await event.client(
@@ -172,10 +172,11 @@ async def story_download(event):
                 captions.append(story.caption or "")
 
         if files:
+            title_name = getattr(target, 'first_name', None) or getattr(target, 'title', 'User')
             await event.client.send_file(
                 event.chat_id, 
                 files, 
-                caption=f"🎭 **{getattr(target, 'first_name', target.title)}'s Stories:**"
+                caption=f"🎭 **{title_name}'s Stories:**"
             )
             for f in files: os.remove(f)
             await status.delete()
