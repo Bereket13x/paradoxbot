@@ -43,16 +43,22 @@ TYPING_FRAMES = [
     "⠏ *Thinking...*",
 ]
 
-async def run_typing_animation(msg, task: asyncio.Task, interval=0.6):
-    """Edit `msg` with spinning frames until `task` completes."""
+async def run_typing_animation(msg, task: asyncio.Task, interval=0.6, max_edits=25):
+    """Edit `msg` with spinning frames until `task` completes, capping at max_edits to avoid spamming."""
     i = 0
-    while not task.done():
+    while not task.done() and i < max_edits:
         try:
             await msg.edit(TYPING_FRAMES[i % len(TYPING_FRAMES)])
         except Exception:
             pass
         i += 1
         await asyncio.sleep(interval)
+        
+    if not task.done():
+        try:
+            await msg.edit("⠋ *Thinking...*")
+        except Exception:
+            pass
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -281,7 +287,7 @@ async def auto_reply_handler(event):
         try:
             response = await api_task
         except asyncio.TimeoutError:
-            response = "❌ Timeout"
+            response = "⏳ *Apologies, the AI assistant is currently unavailable.*"
 
         if not str(response).startswith(("❌", "⏳")):
             conversation_history[chat_id].append({"role": "assistant", "content": str(response)})
