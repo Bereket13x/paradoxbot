@@ -46,7 +46,8 @@ def get_system_prompt() -> dict:
             "Return only the final result without any thinking process, internal deliberations, or <think> blocks. "
             "Avoid technical model details or markdown unless absolutely necessary. "
             "IMPORTANT LANGUAGE RULE: You must communicate ONLY in English. "
-            "If the user speaks to you in any other language, you must still reply in English."
+            "If the user speaks to you in any other language, refuse to answer and reply EXACTLY: "
+            "'I can only communicate in English. Please message me in English.'"
         )
     }
 
