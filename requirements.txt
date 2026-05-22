@@ -18,6 +18,7 @@ beautifulsoup4
 lxml
 html5lib
 urlextract
+curl_cffi
 
 # === Media & Image Processing ===
 pillow
