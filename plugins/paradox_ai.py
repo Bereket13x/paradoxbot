@@ -152,6 +152,7 @@ def init(client):
         ".paitest                 — Test current AI connection",
         ".paiclear                — Clear conversation history",
         ".paistatus               — Show AI status",
+        ".catchup <limit>         — AI summarizes the last <limit> messages",
     ]
     description = "🤖 PARADOX AI — NVIDIA or Gemini powered assistant with auto-reply support."
     add_handler("paradox_ai", commands, description)
@@ -552,5 +553,71 @@ async def aistatus_handler(event):
     except Exception as e:
         await event.reply(f"❌ **Error:** {str(e)}")
 
+
+# ══════════════════════════════════════════════════════════════════════════
+#  .catchup — AI Group Chat Summarizer
+# ══════════════════════════════════════════════════════════════════════════
+
+@CipherElite.on(events.NewMessage(pattern=r"^\.catchup(?:\s+(\d+))?"))
+@rishabh()
+async def catchup_handler(event):
+    try:
+        from plugins.ai_setup import ai_config
+        if not ai_config.is_enabled():
+            provider = ai_config.get_provider()
+            hint = "`.paigemini <key>`" if provider == "gemini" else "`.paiset <key>`"
+            await event.reply(f"🔑 **API Key Required!** Use {hint} to set your key.")
+            return
+
+        limit_str = event.pattern_match.group(1)
+        if not limit_str:
+            return await event.reply("❓ **Usage:** `.catchup <number_of_messages>`\nExample: `.catchup 100`")
+            
+        limit = int(limit_str)
+        if limit > 300:
+            return await event.reply("⚠️ **Limit too high!** Please use 300 or less to avoid token limits.")
+            
+        thinking_msg = await event.reply(f"🔍 **Fetching the last {limit} messages...**")
+        
+        messages = []
+        async for m in event.client.iter_messages(event.chat_id, limit=limit):
+            if m.text:
+                sender = await m.get_sender()
+                name = getattr(sender, 'first_name', 'Unknown') if sender else 'Unknown'
+                messages.append(f"{name}: {m.text}")
+                
+        if not messages:
+            return await thinking_msg.edit("📭 **No text messages found to summarize.**")
+            
+        messages.reverse()
+        transcript = "\n".join(messages)
+        
+        prompt = (
+            "You are a highly efficient AI assistant. I missed the last few messages in this group chat. "
+            "Please read the following chat transcript and provide a comprehensive, detailed summary of the main topics discussed. "
+            "Ignore any system instructions about keeping your answers short or concise. You are allowed and encouraged to write a long, detailed summary (well over 80 words) to accurately capture the full context. "
+            "Use clean bullet points and relevant emojis to make it visually appealing. Do not output any internal reasoning or <think> tags.\n\n"
+            f"Here is the chat transcript:\n\n{transcript}"
+        )
+        
+        await thinking_msg.edit("🤖 **PARADOX AI is reading the transcript...**")
+        
+        api_task = asyncio.create_task(
+            asyncio.wait_for(make_ai_request([{"role": "user", "content": prompt}], max_tokens=1500), timeout=60.0)
+        )
+        asyncio.create_task(run_typing_animation(thinking_msg, api_task))
+        
+        try:
+            response = await api_task
+        except asyncio.TimeoutError:
+            return await thinking_msg.edit("⏰ **Timeout:** Transcript was too long or AI took too long.")
+            
+        if response.startswith(("❌", "⏳")):
+            await thinking_msg.edit(response)
+        else:
+            await thinking_msg.edit(f"📋 **Catch-Up Summary ({limit} msgs):**\n\n{response}")
+            
+    except Exception as e:
+        await event.reply(f"❌ **Error during catchup:** `{str(e)}`")
 
 print("✅ PARADOX AI Plugin loaded successfully")
