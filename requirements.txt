@@ -19,6 +19,7 @@ lxml
 html5lib
 urlextract
 curl_cffi
+gTTS
 
 # === Media & Image Processing ===
 pillow
