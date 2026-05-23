@@ -19,6 +19,7 @@
 from telethon import events
 import asyncio
 import os
+from gtts import gTTS
 import re
 import time
 import textwrap
@@ -39,7 +40,9 @@ def init(client_instance):
         ".id - Get user/chat ID",
         ".dc - Get DC info",
         ".sd <time> <text> - Self-destruct message (e.g. .sd 10s Secret msg)",
-        ".q - Reply to a message to create a stunning quote card"
+        ".q - Reply to a message to create a stunning quote card",
+        ".voicify <reply/text> - Convert text to a voice note",
+        ".reactall <emoji> - React to the last 50 messages"
     ]
     description = "Useful utility tools for your userbot 🔧"
     add_handler("tools", commands, description)
@@ -248,6 +251,67 @@ async def register_commands():
 
         except Exception as e:
             await event.edit(f"❌ **Error:** `{e}`")
+
+    @CipherElite.on(events.NewMessage(pattern=r"^\.voicify(?: |$)([\s\S]*)", outgoing=True))
+    @rishabh()
+    async def voicify(event):
+        reply = await event.get_reply_message()
+        text = event.pattern_match.group(1).strip()
+        
+        if not text and reply:
+            text = reply.text or reply.message
+            
+        if not text:
+            return await event.edit("❌ **Please reply to a text message or provide text.**")
+            
+        await event.edit("🎙️ **Converting to voice...**")
+        try:
+            tts = gTTS(text, lang='en')
+            out_path = os.path.join(TEMP_DIR, "voicify.ogg")
+            tts.save(out_path)
+            
+            await event.client.send_file(
+                event.chat_id,
+                out_path,
+                voice_note=True,
+                reply_to=reply.id if reply else None
+            )
+            await event.delete()
+            if os.path.exists(out_path):
+                os.remove(out_path)
+        except Exception as e:
+            await event.edit(f"❌ **Failed to voicify:** `{str(e)}`")
+
+    @CipherElite.on(events.NewMessage(pattern=r"^\.reactall(?:\s+(.+))?", outgoing=True))
+    @rishabh()
+    async def reactall(event):
+        emoji = event.pattern_match.group(1)
+        if not emoji:
+            return await event.edit("❌ **Usage:** `.reactall <emoji>`\nExample: `.reactall ❤️`")
+            
+        msg = await event.edit(f"🔄 **Reacting to the last 50 messages with {emoji}...**")
+        
+        count = 0
+        try:
+            async for m in event.client.iter_messages(event.chat_id, limit=50):
+                try:
+                    if hasattr(m, 'react'):
+                        await m.react(emoji)
+                    else:
+                        from telethon.tl.functions.messages import SendReactionRequest
+                        from telethon.tl import types
+                        await event.client(SendReactionRequest(
+                            peer=event.chat_id,
+                            msg_id=m.id,
+                            reaction=[types.ReactionEmoji(emoticon=emoji)]
+                        ))
+                    count += 1
+                    await asyncio.sleep(0.3)
+                except Exception:
+                    pass
+            await msg.edit(f"✅ **Successfully reacted to {count} messages with {emoji}!**")
+        except Exception as e:
+            await msg.edit(f"❌ **Error:** `{str(e)}`")
 
 
 # Initialize start time
