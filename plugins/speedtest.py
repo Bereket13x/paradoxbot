@@ -102,7 +102,7 @@ async def speedtest_cmd(event):
     elif input_str == "link":
         as_link = True
 
-    catevent = await event.reply("`Calculating internet speed using Official Ookla CLI. Please wait...`")
+    catevent = await event.reply("⚡ **Testing network performance. Please wait...**")
     
     try:
         loop = asyncio.get_event_loop()
