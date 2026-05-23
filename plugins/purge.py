@@ -1,201 +1,268 @@
 # =============================================================================
-#  CipherElite Userbot Plugin
+#  PARADOX Userbot Plugin
 #
 #  Plugin Name:    purge
-#  Author:         CipherElite Dev (@rishabhops)
-#  Repository:     https://github.com/rishabhops/CipherElite
+#  Description:    Purge messages in the current chat and delete all history
 #
-#  License:        MIT
-#
-#  IMPORTANT:
-#    • If you copy, fork, or include this plugin in your own bot,
-#      you MUST keep this header intact.
-#    • You MUST give proper credit to the CipherElite Userbot author:
-#        – GitHub:    https://github.com/rishabhops/CipherElite
-#        – Telegram:  @thanosceo
-#
-#  Thank you for respecting open-source software!
 # =============================================================================
 
 import asyncio
 from telethon import events
-from telethon.errors import RPCError
-from telethon.tl.types import ChannelParticipantsAdmins, PeerUser
+from telethon.errors import RPCError, MessageDeleteForbiddenError
+from telethon.tl.functions.messages import DeleteHistoryRequest
+from telethon.tl.types import ChannelParticipantsAdmins
 
 from utils.utils import CipherElite
 from utils.decorators import rishabh
 from plugins.bot import add_handler
 
+
 def init(client):
     commands = [
-        ".purge    — Delete all messages from replied message to current (DM/Group)",
-        ".p        — Alias for .purge",
-        ".delall   — Delete all messages (optionally for a specific user) with 20s delay"
+        ".purge  — Delete all messages from replied msg to current (must reply)",
+        ".p      — Alias for .purge",
+        ".delall — Delete entire chat history (or a specific user's msgs if replied)",
     ]
     add_handler("purge", commands, "Message Purge Plugin")
 
-async def is_user_admin(client, chat_id, user_id):
-    """Check if user is admin in chat or if it's a DM."""
-    if hasattr(chat_id, 'chat_id'):
-        chat_id = chat_id.chat_id
+
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+async def _is_admin(client, chat_id, user_id) -> bool:
+    """Return True if user is admin/creator in a group/channel, or if it's a DM."""
     try:
-        async for admin in client.iter_participants(chat_id, filter=ChannelParticipantsAdmins):
+        async for admin in client.iter_participants(
+            chat_id, filter=ChannelParticipantsAdmins
+        ):
             if admin.id == user_id:
                 return True
         return False
     except Exception:
-        return True  # Allow in DMs
+        # Can't check → assume DM or small group; allow
+        return True
 
+
+
+
+
+# ─── Global cancellation flags ────────────────────────────────────────────────
+# Key: chat_id  →  Value: asyncio.Event  (set = cancel requested)
+_cancel_flags: dict[int, asyncio.Event] = {}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  .purge / .p  — delete from replied message up to .purge message (inclusive)
+# ─────────────────────────────────────────────────────────────────────────────
 @CipherElite.on(events.NewMessage(pattern=r"^\.(purge|p)$", outgoing=True))
 @rishabh()
-async def purge(event):
-    """Delete messages from replied message to current message."""
+async def purge_cmd(event):
+    """Delete every message between the replied-to message and this one."""
+
     reply = await event.get_reply_message()
     if not reply:
-        await event.reply("❌ **Please reply to a message to start purging from there.**")
+        await event.reply("❌ **Reply to the message you want to start purging from.**")
         return
 
     chat_id = event.chat_id
-    user_id = event.sender_id
+    me = await CipherElite.get_me()
 
-    if event.is_group or event.is_channel:
-        if not await is_user_admin(CipherElite, chat_id, user_id):
-            await event.reply("❌ **You need to be an admin to purge messages in this chat.**")
+    # Admin check for groups/channels
+    if not event.is_private:
+        if not await _is_admin(CipherElite, chat_id, me.id):
+            await event.reply(
+                "❌ **I need admin rights with delete-messages permission to purge here.**"
+            )
             return
 
-    start_msg_id = reply.id
-    end_msg_id = event.id
+    start_id = reply.id
+    end_id = event.id  # the .purge command itself (already deleted by decorator)
 
-    if start_msg_id >= end_msg_id:
+    if start_id >= end_id:
         await event.reply("❌ **No messages to purge.**")
         return
 
-    batch_size = 100
-    try:
-        msg_ids = list(range(start_msg_id, end_msg_id + 1))
-        for i in range(0, len(msg_ids), batch_size):
-            await CipherElite.delete_messages(chat_id, msg_ids[i:i + batch_size], revoke=True)
-            await asyncio.sleep(0.5)
+    # Collect all real message IDs in this chat between start and end
+    # Using iter_messages with min_id / max_id avoids touching other chats
+    ids_to_delete = []
+    async for msg in CipherElite.iter_messages(
+        chat_id,
+        min_id=start_id - 1,   # iter_messages is exclusive on min side
+        max_id=end_id + 1,     # exclusive on max side
+        reverse=True,
+    ):
+        ids_to_delete.append(msg.id)
 
-        confirmation = await event.respond("✅ **Purge completed successfully!**")
-        await asyncio.sleep(3)
-        await confirmation.delete()
-    except RPCError as e:
-        await event.reply(f"❌ **Error during purge:** `{str(e)}`")
+    if not ids_to_delete:
+        await event.reply("❌ **No messages found in that range.**")
+        return
+
+    # Delete in batches of 100 (Telegram API limit)
+    BATCH = 100
+    deleted = 0
+    try:
+        for i in range(0, len(ids_to_delete), BATCH):
+            batch = ids_to_delete[i : i + BATCH]
+            await CipherElite.delete_messages(chat_id, batch, revoke=True)
+            deleted += len(batch)
+            if i + BATCH < len(ids_to_delete):
+                await asyncio.sleep(0.4)
+    except (RPCError, MessageDeleteForbiddenError) as e:
+        await event.reply(f"❌ **Purge failed:** `{e}`")
+        return
     except Exception as e:
-        await event.reply(f"❌ **An unexpected error occurred:** `{str(e)}`")
+        await event.reply(f"❌ **Unexpected error:** `{e}`")
+        return
 
-# Global dictionary to track cancellation flags
-cancellation_flags = {}
-
-@CipherElite.on(events.NewMessage(pattern=r"^\.delall$", outgoing=True))
-@rishabh()
-async def delall(event):
-    """Delete all messages (optionally for a specific user) with cancellation support."""
-    chat = event.chat
-    user_id = event.sender_id
-    is_private = isinstance(chat, PeerUser)
-    
-    # Delete command message immediately
+    confirm = await event.reply(f"✅ **Purged {deleted} messages.**")
+    await asyncio.sleep(3)
     try:
-        await event.delete()
+        await confirm.delete()
     except Exception:
         pass
 
-    # Determine target user (if any)
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  .delall  — delete full history or a specific user's messages
+# ─────────────────────────────────────────────────────────────────────────────
+@CipherElite.on(events.NewMessage(pattern=r"^\.delall$", outgoing=True))
+@rishabh()
+async def delall_cmd(event):
+    """
+    Delete entire chat history.
+    • No reply  → delete ALL messages in the chat (needs admin in groups).
+    • Reply     → delete that user's messages only (needs admin if not yourself).
+    """
+    chat_id = event.chat_id
+    me = await CipherElite.get_me()
+    private = event.is_private
+
+    # Determine target
     target_user = None
     if event.is_reply:
         reply = await event.get_reply_message()
-        target_user = reply.sender_id
+        if reply and reply.sender_id:
+            target_user = reply.sender_id
 
-    # Permission checks
-    if not is_private:
-        if target_user and target_user != user_id:
-            # Deleting another user's messages - need admin
-            if not await is_user_admin(CipherElite, chat, user_id):
-                msg = await event.respond("🚫 You need admin rights to delete other users' messages!")
+    # ── Permission checks ────────────────────────────────────────────────────
+    if not private:
+        # Deleting someone else's messages or ALL messages → need admin
+        if target_user != me.id:
+            if not await _is_admin(CipherElite, chat_id, me.id):
+                msg = await event.reply(
+                    "🚫 **Admin rights required** to delete messages in this chat."
+                )
                 await asyncio.sleep(5)
-                await msg.delete()
-                return
-        elif not target_user:
-            # Deleting all messages - need admin
-            if not await is_user_admin(CipherElite, chat, user_id):
-                msg = await event.respond("🚫 You need admin rights to delete all messages!")
-                await asyncio.sleep(5)
-                await msg.delete()
+                try:
+                    await msg.delete()
+                except Exception:
+                    pass
                 return
 
-    # Create cancellation flag for this chat
-    cancellation_flags[event.chat_id] = asyncio.Event()
-    cancel_flag = cancellation_flags[event.chat_id]
+    # ── Set up cancellation ──────────────────────────────────────────────────
+    flag = asyncio.Event()
+    _cancel_flags[chat_id] = flag
 
-    # Send warning with cancellation instructions
-    warning_msg = await event.respond(
-        "⚠️ Deleting ALL messages in 20 seconds!\n"
-        f"Type `.cancel` to abort. {'(Deleting only your messages)' if target_user == user_id else ''}"
+    scope_text = (
+        "your messages"
+        if target_user == me.id
+        else f"messages from user `{target_user}`"
+        if target_user
+        else "**ALL messages**"
+    )
+    warning = await event.reply(
+        f"⚠️ About to delete {scope_text} in **20 seconds**.\n"
+        "Reply `.cancel` to abort."
     )
 
-    # Wait for 20 seconds or cancellation
+    # ── 20-second countdown ──────────────────────────────────────────────────
     try:
-        await asyncio.wait_for(cancel_flag.wait(), timeout=20)
-        await warning_msg.edit("🚫 Deletion cancelled!")
-        await asyncio.sleep(3)
-        await warning_msg.delete()
+        await asyncio.wait_for(flag.wait(), timeout=20)
+        # Cancelled
+        try:
+            await warning.edit("🚫 **Deletion cancelled.**")
+            await asyncio.sleep(3)
+            await warning.delete()
+        except Exception:
+            pass
         return
     except asyncio.TimeoutError:
         pass
     finally:
-        cancellation_flags.pop(event.chat_id, None)
+        _cancel_flags.pop(chat_id, None)
 
-    # Start deletion process
-    await warning_msg.edit("🗑️ Deleting messages...")
-    deleted_count = 0
-
+    # ── Perform deletion ─────────────────────────────────────────────────────
     try:
-        if not target_user:
-            from telethon.tl.functions.messages import DeleteHistoryRequest
-            await CipherElite(DeleteHistoryRequest(
-                peer=event.chat_id,
-                max_id=0,
-                just_clear=False,
-                revoke=True
-            ))
-            deleted_count = "all"
-        else:
-            async for message in CipherElite.iter_messages(
-                event.chat_id,
-                from_user=target_user,
-                reverse=True
-            ):
-                if message.id == warning_msg.id:
-                    continue
-                    
-                try:
-                    await message.delete(revoke=True)
-                    deleted_count += 1
-                    if deleted_count % 10 == 0:
-                        await asyncio.sleep(0.5)
-                except Exception:
-                    pass
-    except Exception as e:
-        await warning_msg.edit(f"❌ Error: {str(e)}")
-        await asyncio.sleep(5)
-    else:
-        await warning_msg.edit(f"✅ Deleted {deleted_count} messages!")
-        await asyncio.sleep(3)
-    
-    # Final cleanup
-    try:
-        await warning_msg.delete()
+        await warning.edit("🗑️ **Deleting messages…**")
     except Exception:
         pass
 
-@CipherElite.on(events.NewMessage(pattern=r"^\.cancel$"))
-async def cancel_delall(event):
-    """Handle cancellation requests for delall operations."""
+    deleted_count = 0
+    error_msg = None
+
+    try:
+        if target_user is None:
+            # Delete entire history via Telegram's API (works in DMs + groups where you own them)
+            await CipherElite(
+                DeleteHistoryRequest(
+                    peer=chat_id,
+                    max_id=2_147_483_647,   # delete everything up to the last possible ID
+                    revoke=True,            # delete for everyone
+                    just_clear=False,
+                )
+            )
+            deleted_count = "all"
+        else:
+            # Delete specific user's messages one by one
+            BATCH = 100
+            batch_ids = []
+
+            async for msg in CipherElite.iter_messages(
+                chat_id, from_user=target_user
+            ):
+                if msg.id == warning.id:
+                    continue
+                batch_ids.append(msg.id)
+
+                if len(batch_ids) >= BATCH:
+                    await CipherElite.delete_messages(
+                        chat_id, batch_ids, revoke=True
+                    )
+                    deleted_count += len(batch_ids)
+                    batch_ids.clear()
+                    await asyncio.sleep(0.4)
+
+            # Flush remainder
+            if batch_ids:
+                await CipherElite.delete_messages(
+                    chat_id, batch_ids, revoke=True
+                )
+                deleted_count += len(batch_ids)
+
+    except Exception as e:
+        error_msg = str(e)
+
+    # ── Final status ─────────────────────────────────────────────────────────
+    try:
+        if error_msg:
+            await warning.edit(f"❌ **Error:** `{error_msg}`")
+            await asyncio.sleep(6)
+        else:
+            await warning.edit(f"✅ **Deleted {deleted_count} messages.**")
+            await asyncio.sleep(3)
+        await warning.delete()
+    except Exception:
+        pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  .cancel  — abort a running .delall countdown
+# ─────────────────────────────────────────────────────────────────────────────
+@CipherElite.on(events.NewMessage(pattern=r"^\.cancel$", outgoing=True))
+async def cancel_cmd(event):
+    """Cancel a pending .delall operation in the current chat."""
     chat_id = event.chat_id
-    if chat_id in cancellation_flags:
-        cancellation_flags[chat_id].set()
+    if chat_id in _cancel_flags:
+        _cancel_flags[chat_id].set()
         try:
             await event.delete()
         except Exception:
