@@ -19,6 +19,7 @@
 from telethon import events
 import asyncio
 import os
+import requests
 from gtts import gTTS
 import re
 import time
@@ -42,7 +43,8 @@ def init(client_instance):
         ".sd <time> <text> - Self-destruct message (e.g. .sd 10s Secret msg)",
         ".q - Reply to a message to create a stunning quote card",
         ".voicify <reply/text> - Convert text to a voice note",
-        ".reactall <emoji> - React to the last 50 messages"
+        ".reactall <emoji> - React to the last 50 messages",
+        ".unmask <reply/link> - Safely unmask short URLs & redirects"
     ]
     description = "Useful utility tools for your userbot 🔧"
     add_handler("tools", commands, description)
@@ -312,6 +314,46 @@ async def register_commands():
             await msg.edit(f"✅ **Successfully reacted to {count} messages with {emoji}!**")
         except Exception as e:
             await msg.edit(f"❌ **Error:** `{str(e)}`")
+
+    @CipherElite.on(events.NewMessage(pattern=r"^\.unmask(?: |$)([\s\S]*)", outgoing=True))
+    @rishabh()
+    async def unmask(event):
+        reply = await event.get_reply_message()
+        text = event.pattern_match.group(1).strip()
+        
+        if not text and reply:
+            text = reply.text or reply.message
+            
+        if not text:
+            return await event.edit("❌ **Provide a link or reply to a message containing links.**")
+            
+        url_pattern = re.compile(r'https?://[^\s]+')
+        urls = url_pattern.findall(text)
+        
+        if not urls:
+            return await event.edit("❌ **No URLs found in the message.**")
+            
+        await event.edit("🔍 **Unmasking links behind proxies...**")
+        
+        session = requests.Session()
+        session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"})
+        
+        result = "🛡️ **PARADOX Link Unmasker**\n\n"
+        for url in urls[:5]:  # Limit to 5 to avoid long processing
+            try:
+                # stream=True avoids downloading large files, just reads the headers & redirects
+                response = session.get(url, allow_redirects=True, timeout=10, stream=True)
+                final_url = response.url
+                response.close()
+                
+                if final_url != url:
+                    result += f"🔗 **Original:** `{url}`\n🎯 **Final Dest:** `{final_url}`\n\n"
+                else:
+                    result += f"🔗 **Link:** `{url}`\n✅ **Status:** `Direct Link (No Redirects)`\n\n"
+            except Exception:
+                result += f"🔗 **Original:** `{url}`\n❌ **Error:** `Unreachable or blocked`\n\n"
+                
+        await event.edit(result)
 
 
 # Initialize start time
