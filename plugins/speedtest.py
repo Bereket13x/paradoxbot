@@ -26,7 +26,8 @@ def init(client):
         ".speedtest",
         ".speedtest text",
         ".speedtest image",
-        ".speedtest file"
+        ".speedtest file",
+        ".speedtest link"
     ]
     desc = "Botserver's speedtest by ookla."
     add_handler("speedtest", commands, desc)
@@ -91,12 +92,15 @@ async def speedtest_cmd(event):
     input_str = event.pattern_match.group(1).strip().lower()
     as_text = False
     as_document = False
+    as_link = False
     if input_str == "file":
         as_document = True
     elif input_str == "image":
         as_document = False
     elif input_str == "text":
         as_text = True
+    elif input_str == "link":
+        as_link = True
 
     catevent = await event.reply("`Calculating internet speed using Official Ookla CLI. Please wait...`")
     
@@ -106,7 +110,17 @@ async def speedtest_cmd(event):
         
         reply_msg_id = event.reply_to_msg_id or event.id
 
-        if as_text:
+        if as_link:
+            raw_url = speedtest_image.replace(".png", "")
+            await catevent.edit(
+                f"🚀 **SpeedTest Results**\n\n"
+                f"⬇️ **Download:** `{convert_from_bytes(dl_bps)}`\n"
+                f"⬆️ **Upload:** `{convert_from_bytes(ul_bps)}`\n"
+                f"🏓 **Ping:** `{ping_time} ms`\n"
+                f"🌐 **ISP:** `{i_s_p}`\n\n"
+                f"🔗 **Result Link:** [Click Here to View]({raw_url})"
+            )
+        elif as_text:
             await catevent.edit(
                 f"""`SpeedTest completed in {ms} seconds`
 
