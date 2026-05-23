@@ -266,7 +266,7 @@ async def register_commands():
         if not text:
             return await event.edit("❌ **Please reply to a text message or provide text.**")
             
-        await event.edit("🎙️ **Converting to voice...**")
+        msg = await event.edit("🎙️ **Converting to voice...**")
         try:
             tts = gTTS(text, lang='en')
             out_path = os.path.join(TEMP_DIR, "voicify.ogg")
@@ -278,7 +278,12 @@ async def register_commands():
                 voice_note=True,
                 reply_to=reply.id if reply else None
             )
-            await event.delete()
+            # Explicitly delete the edited message
+            try:
+                await msg.delete()
+            except Exception:
+                await event.delete()
+                
             if os.path.exists(out_path):
                 os.remove(out_path)
         except Exception as e:
